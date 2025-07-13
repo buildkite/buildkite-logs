@@ -2,6 +2,10 @@
 
 A Go library and CLI tool for parsing Buildkite log files that contain OSC (Operating System Command) sequences with timestamps.
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/wolfeidau/buildkite-logs-parquet)](https://goreportcard.com/report/github.com/wolfeidau/buildkite-logs-parquet) 
+[![Documentation](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/wolfeidau/buildkite-logs-parquet)
+
+
 ## Overview
 
 Buildkite logs use a special format where each log entry is prefixed with an OSC sequence containing a timestamp:
@@ -28,186 +32,6 @@ This parser extracts the timestamps and content, providing both a Go library API
 - **Group Tracking**: Automatically associate entries with build groups/sections
 - **Parquet Export**: Efficient columnar storage for analytics and data processing
 - **Parquet Query**: Fast querying of exported Parquet files with Apache Arrow Go v18
-
-## Library Usage
-
-### Basic Usage
-
-```go
-package main
-
-import (
-    "fmt"
-    "os"
-    
-    buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
-)
-
-func main() {
-    parser := buildkitelogs.NewParser()
-    
-    // Parse a single line
-    entry, err := parser.ParseLine("\x1b_bk;t=1745322209921\x07~~~ Running tests")
-    if err != nil {
-        panic(err)
-    }
-    
-    fmt.Printf("Timestamp: %s\n", entry.Timestamp)
-    fmt.Printf("Content: %s\n", entry.Content)
-    fmt.Printf("Is Section: %t\n", entry.IsSection())
-}
-```
-
-### Memory-Efficient Streaming Processing (Recommended)
-
-For large log files, use the iterator interface to keep memory usage low:
-
-#### Streaming Iterator (Go 1.23+)
-
-```go
-package main
-
-import (
-    "fmt"
-    "os"
-    
-    buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
-)
-
-func main() {
-    parser := buildkitelogs.NewParser()
-    
-    file, err := os.Open("buildkite.log")
-    if err != nil {
-        panic(err)
-    }
-    defer file.Close()
-    
-    // Use the modern iter.Seq2 pattern with proper error handling
-    lineNum := 0
-    for entry, err := range parser.All(file) {
-        if err != nil {
-            panic(err)
-        }
-        
-        lineNum++
-        
-        // Process entries
-        if entry.IsCommand() {
-            fmt.Printf("Line %d: [%s] %s\n", lineNum, entry.Timestamp, entry.CleanContent())
-        }
-        
-        // Early exit example - stop after 100 lines
-        if lineNum >= 100 {
-            break
-        }
-    }
-}
-```
-
-### Querying Parquet Files
-
-The library provides fast query capabilities for Parquet files using Apache Arrow Go v18:
-
-```go
-package main
-
-import (
-    "fmt"
-    "log"
-    
-    buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
-)
-
-func main() {
-    // Create a Parquet reader
-    reader := buildkitelogs.NewParquetReader("buildkite_logs.parquet")
-    
-    // Stream through entries and build group statistics
-    groupMap := make(map[string]*buildkitelogs.GroupInfo)
-    totalEntries := 0
-    
-    for entry, err := range reader.ReadEntriesIter() {
-        if err != nil {
-            log.Fatal(err)
-        }
-        
-        totalEntries++
-        
-        // Build group statistics
-        groupName := entry.Group
-        if groupName == "" {
-            groupName = "<no group>"
-        }
-        
-        if groupMap[groupName] == nil {
-            groupMap[groupName] = &buildkitelogs.GroupInfo{
-                Name: groupName,
-            }
-        }
-        groupMap[groupName].EntryCount++
-        
-        if entry.IsCommand {
-            groupMap[groupName].Commands++
-        }
-    }
-    
-    // Display results
-    for _, group := range groupMap {
-        fmt.Printf("Group: %s (%d entries, %d commands)\n", 
-            group.Name, group.EntryCount, group.Commands)
-    }
-    
-    // Filter entries by group pattern using streaming
-    matchedCount := 0
-    for entry, err := range reader.FilterByGroupIter("environment") {
-        if err != nil {
-            log.Fatal(err)
-        }
-        matchedCount++
-        
-        // Process matched entries...
-        _ = entry
-    }
-    
-    fmt.Printf("Found %d entries containing 'environment'\n", matchedCount)
-}
-```
-
-#### Streaming Query Operations
-
-**Stream All Entries**: Iterate through all entries with constant memory usage
-```go
-for entry, err := range reader.ReadEntriesIter() {
-    if err != nil {
-        log.Fatal(err)
-    }
-    // Process entry...
-}
-```
-
-**Filter by Group**: Stream entries matching a group pattern
-```go
-for entry, err := range reader.FilterByGroupIter("test") {
-    if err != nil {
-        log.Fatal(err)
-    }
-    // Process filtered entry...
-}
-```
-
-#### Direct File Streaming
-
-```go
-// Stream entries directly from a Parquet file
-for entry, err := range buildkitelogs.ReadParquetFileIter("logs.parquet") {
-    if err != nil {
-        log.Fatal(err)
-    }
-    // Process entry with constant memory usage...
-}
-```
-
 
 ## CLI Usage
 
@@ -395,6 +219,66 @@ Query time: 0.36 ms
 ./build/bklog query -file output.parquet -op list-groups -stats=false
 ```
 
+**Query last 20 entries:**
+```bash
+./build/bklog query -file output.parquet -op tail -tail 20
+```
+
+**Query specific row position:**
+```bash
+./build/bklog query -file output.parquet -op seek -seek 100
+```
+
+**Limit query results:**
+```bash
+./build/bklog query -file output.parquet -op by-group -group "test" -limit 50
+```
+
+**Get file information:**
+```bash
+./build/bklog query -file output.parquet -op info
+```
+
+#### Real Examples Using Test Data
+
+The repository includes test data files that you can use to try out the tail functionality:
+
+**View last 5 entries from the test log:**
+```bash
+./build/bklog query -file ./testdata/bash-example.parquet -op tail -tail 5
+```
+Output:
+```
+[2025-04-22 21:43:32.739] [CMD] $ echo 'Tests passed!'
+[2025-04-22 21:43:32.740] Tests passed!
+[2025-04-22 21:43:32.740] [GRP] +++ End of Example tests
+[2025-04-22 21:43:32.740] [CMD] $ buildkite-agent annotate --style success 'Build passed'
+[2025-04-22 21:43:32.748] Annotation added
+```
+
+**View last 10 entries (default) with JSON output:**
+```bash
+./build/bklog query -file ./testdata/bash-example.parquet -op tail -format json
+```
+
+**Parse the raw log file and immediately query the last 3 entries:**
+```bash
+# First create a fresh parquet file from the raw log
+./build/bklog parse -file ./testdata/bash-example.log -parquet temp.parquet
+
+# Then query the last 3 entries
+./build/bklog query -file temp.parquet -op tail -tail 3
+```
+
+**Combine with other operations - show file info then tail:**
+```bash
+# Get file statistics
+./build/bklog query -file ./testdata/bash-example.parquet -op info
+
+# Then view the last few entries
+./build/bklog query -file ./testdata/bash-example.parquet -op tail -tail 7
+```
+
 ### CLI Options
 
 #### Parse Command
@@ -402,7 +286,16 @@ Query time: 0.36 ms
 ./build/bklog parse [options]
 ```
 
-- `-file <path>`: Path to Buildkite log file (required)
+**Local File Options:**
+- `-file <path>`: Path to Buildkite log file (use this OR API parameters below)
+
+**Buildkite API Options:**
+- `-org <slug>`: Buildkite organization slug (for API access)
+- `-pipeline <slug>`: Buildkite pipeline slug (for API access)
+- `-build <number>`: Buildkite build number or UUID (for API access)
+- `-job <id>`: Buildkite job ID (for API access)
+
+**Output Options:**
 - `-json`: Output as JSON instead of text
 - `-strip-ansi`: Remove ANSI escape sequences from output
 - `-filter <type>`: Filter entries by type (`command`, `group`, `progress`)
@@ -416,10 +309,13 @@ Query time: 0.36 ms
 ```
 
 - `-file <path>`: Path to Parquet log file (required)
-- `-op <operation>`: Query operation (`list-groups`, `by-group`)
+- `-op <operation>`: Query operation (`list-groups`, `by-group`, `info`, `tail`, `seek`) (default: `list-groups`)
 - `-group <pattern>`: Group name pattern to filter by (for `by-group` operation)
-- `-format <format>`: Output format (`text`, `json`)
-- `-stats`: Show query statistics (default: true)
+- `-format <format>`: Output format (`text`, `json`) (default: `text`)
+- `-stats`: Show query statistics (default: `true`)
+- `-limit <number>`: Limit number of entries returned (0 = no limit, enables early termination)
+- `-tail <number>`: Number of lines to show from end (for `tail` operation, default: 10)
+- `-seek <row>`: Row number to seek to (0-based, for `seek` operation)
 
 ## Log Entry Types
 

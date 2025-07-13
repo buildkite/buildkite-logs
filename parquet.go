@@ -13,6 +13,28 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 )
 
+func createNewFileWriter(schema *arrow.Schema, file *os.File, pool memory.Allocator) (*pqarrow.FileWriter, error) {
+	// Create Parquet writer
+	writer, err := pqarrow.NewFileWriter(schema, file,
+		parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithCompressionLevel(3),
+			parquet.WithSortingColumns([]parquet.SortingColumn{
+				{ColumnIdx: 0, Descending: false, NullsFirst: true}, // Timestamp
+				{ColumnIdx: 2, Descending: false, NullsFirst: true}, // Group
+			}),
+		),
+		pqarrow.NewArrowWriterProperties(
+			pqarrow.WithAllocator(pool),
+			pqarrow.WithCoerceTimestamps(arrow.Millisecond),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Parquet writer: %w", err)
+	}
+	return writer, nil
+}
+
 // createArrowSchema creates the Arrow schema for log entries
 func createArrowSchema() *arrow.Schema {
 	return arrow.NewSchema([]arrow.Field{
@@ -117,20 +139,7 @@ func ExportToParquet(entries []*LogEntry, filename string) error {
 	defer record.Release()
 
 	// Create Parquet writer
-	writer, err := pqarrow.NewFileWriter(record.Schema(), file,
-		parquet.NewWriterProperties(
-			parquet.WithCompression(compress.Codecs.Zstd),
-			parquet.WithCompressionLevel(3),
-			parquet.WithSortingColumns([]parquet.SortingColumn{
-				{ColumnIdx: 0, Descending: false, NullsFirst: true}, // Timestamp
-				{ColumnIdx: 2, Descending: false, NullsFirst: true}, // Group
-			}),
-		),
-		pqarrow.NewArrowWriterProperties(
-			pqarrow.WithAllocator(pool),
-			pqarrow.WithCoerceTimestamps(arrow.Millisecond),
-		),
-	)
+	writer, err := createNewFileWriter(createArrowSchema(), file, pool)
 	if err != nil {
 		return err
 	}
@@ -158,7 +167,7 @@ func NewParquetWriter(file *os.File) *ParquetWriter {
 	pool := memory.NewGoAllocator()
 	schema := createArrowSchema()
 
-	writer, err := pqarrow.NewFileWriter(schema, file, nil, pqarrow.DefaultWriterProps())
+	writer, err := createNewFileWriter(schema, file, pool)
 	if err != nil {
 		return nil // In a real implementation, we'd want to return the error
 	}

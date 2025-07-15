@@ -239,6 +239,36 @@ Query time: 0.36 ms
 ./build/bklog query -file output.parquet -op info
 ```
 
+#### Buildkite API Integration
+
+The query command now supports direct API integration, automatically downloading and caching logs from Buildkite:
+
+**Query logs directly from Buildkite API:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-groups
+```
+
+**Query specific group from API logs:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op by-group -group "tests"
+```
+
+**Query last 10 entries from API logs:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op tail -tail 10
+```
+
+**Get file info for cached API logs:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op info
+```
+
+Logs are automatically downloaded and cached in `~/.bklog/` as `{org}-{pipeline}-{build}-{job}.parquet` files. Subsequent queries use the cached version unless the cache is manually cleared.
+
 #### Real Examples Using Test Data
 
 The repository includes test data files that you can use to try out the tail functionality:
@@ -308,7 +338,16 @@ Output:
 ./build/bklog query [options]
 ```
 
-- `-file <path>`: Path to Parquet log file (required)
+**Data Source Options (choose one):**
+- `-file <path>`: Path to Parquet log file (use this OR API parameters below)
+
+**Buildkite API Options:**
+- `-org <slug>`: Buildkite organization slug (for API access)
+- `-pipeline <slug>`: Buildkite pipeline slug (for API access)
+- `-build <number>`: Buildkite build number or UUID (for API access)
+- `-job <id>`: Buildkite job ID (for API access)
+
+**Query Options:**
 - `-op <operation>`: Query operation (`list-groups`, `by-group`, `info`, `tail`, `seek`) (default: `list-groups`)
 - `-group <pattern>`: Group name pattern to filter by (for `by-group` operation)
 - `-format <format>`: Output format (`text`, `json`) (default: `text`)
@@ -316,6 +355,8 @@ Output:
 - `-limit <number>`: Limit number of entries returned (0 = no limit, enables early termination)
 - `-tail <number>`: Number of lines to show from end (for `tail` operation, default: 10)
 - `-seek <row>`: Row number to seek to (0-based, for `seek` operation)
+
+**Note:** For API usage, set `BUILDKITE_API_TOKEN` environment variable. Logs are automatically downloaded and cached in `~/.bklog/`.
 
 ## Log Entry Types
 

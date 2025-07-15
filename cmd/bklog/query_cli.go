@@ -20,12 +20,48 @@ type QueryConfig struct {
 	LimitEntries int   // Limit output entries (0 = no limit)
 	TailLines    int   // Number of lines to show from end (for tail operation)
 	SeekToRow    int64 // Row number to seek to (0-based)
+	// Buildkite API parameters
+	Organization string
+	Pipeline     string
+	Build        string
+	Job          string
 }
 
 // runQuery executes a query using streaming iterators
 func runQuery(config *QueryConfig) error {
-	reader := buildkitelogs.NewParquetReader(config.ParquetFile)
+	// Resolve the parquet file path
+	parquetFile, err := resolveParquetFilePath(config)
+	if err != nil {
+		return err
+	}
+
+	reader := buildkitelogs.NewParquetReader(parquetFile)
 	return runStreamingQuery(reader, config)
+}
+
+// resolveParquetFilePath determines the parquet file path to use
+func resolveParquetFilePath(config *QueryConfig) (string, error) {
+	// If file path is provided directly, use it
+	if config.ParquetFile != "" {
+		return config.ParquetFile, nil
+	}
+
+	// If API parameters are provided, download and cache
+	if config.Organization != "" && config.Pipeline != "" && config.Build != "" && config.Job != "" {
+		apiToken := os.Getenv("BUILDKITE_API_TOKEN")
+		if apiToken == "" {
+			return "", fmt.Errorf("BUILDKITE_API_TOKEN environment variable is required for API access")
+		}
+
+		cacheFilePath, err := buildkitelogs.DownloadAndCache(apiToken, config.Organization, config.Pipeline, config.Build, config.Job, version)
+		if err != nil {
+			return "", fmt.Errorf("failed to download and cache logs: %w", err)
+		}
+
+		return cacheFilePath, nil
+	}
+
+	return "", fmt.Errorf("either -file or API parameters must be provided")
 }
 
 // runStreamingQuery executes streaming queries for memory efficiency
@@ -141,7 +177,7 @@ func streamByGroup(reader *buildkitelogs.ParquetReader, config *QueryConfig, sta
 
 	// Count total entries for stats if needed (requires separate iteration)
 	if config.ShowStats {
-		for _, _ = range reader.ReadEntriesIter() {
+		for range reader.ReadEntriesIter() {
 			totalEntries++
 		}
 	}
@@ -177,10 +213,10 @@ func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries 
 	}
 
 	// Text format
-	fmt.Printf("Groups found: %d\n\n", len(groups))
+	fmt.Fprintf(os.Stderr, "Groups found: %d\n\n", len(groups))
 
 	if len(groups) == 0 {
-		fmt.Println("No groups found.")
+		fmt.Fprintln(os.Stderr, "No groups found.")
 		return nil
 	}
 
@@ -200,10 +236,10 @@ func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries 
 	}
 
 	if config.ShowStats {
-		fmt.Printf("\n--- Query Statistics (Streaming) ---\n")
-		fmt.Printf("Total entries: %d\n", totalEntries)
-		fmt.Printf("Total groups: %d\n", len(groups))
-		fmt.Printf("Query time: %.2f ms\n", queryTime)
+		fmt.Fprintf(os.Stderr, "\n--- Query Statistics (Streaming) ---\n")
+		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
+		fmt.Fprintf(os.Stderr, "Total groups: %d\n", len(groups))
+		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 
 	return nil
@@ -239,10 +275,10 @@ func formatStreamingEntriesResult(entries []buildkitelogs.ParquetLogEntry, total
 	if config.LimitEntries > 0 && matchedEntries >= config.LimitEntries {
 		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
 	}
-	fmt.Printf("Entries in group matching '%s': %d%s\n\n", config.GroupName, matchedEntries, limitText)
+	fmt.Fprintf(os.Stderr, "Entries in group matching '%s': %d%s\n\n", config.GroupName, matchedEntries, limitText)
 
 	if len(entries) == 0 {
-		fmt.Println("No entries found for the specified group.")
+		fmt.Fprintln(os.Stderr, "No entries found for the specified group.")
 		return nil
 	}
 
@@ -272,12 +308,12 @@ func formatStreamingEntriesResult(entries []buildkitelogs.ParquetLogEntry, total
 	}
 
 	if config.ShowStats {
-		fmt.Printf("\n--- Query Statistics (Streaming) ---\n")
+		fmt.Fprintf(os.Stderr, "\n--- Query Statistics (Streaming) ---\n")
 		if totalEntries > 0 {
-			fmt.Printf("Total entries: %d\n", totalEntries)
+			fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
 		}
-		fmt.Printf("Matched entries: %d\n", matchedEntries)
-		fmt.Printf("Query time: %.2f ms\n", queryTime)
+		fmt.Fprintf(os.Stderr, "Matched entries: %d\n", matchedEntries)
+		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 
 	return nil
@@ -297,12 +333,12 @@ func showFileInfo(reader *buildkitelogs.ParquetReader, config *QueryConfig) erro
 	}
 
 	// Text format
-	fmt.Printf("Parquet File Information:\n")
-	fmt.Printf("  File:         %s\n", config.ParquetFile)
-	fmt.Printf("  Rows:         %d\n", info.RowCount)
-	fmt.Printf("  Columns:      %d\n", info.ColumnCount)
-	fmt.Printf("  File Size:    %d bytes (%.2f MB)\n", info.FileSize, float64(info.FileSize)/(1024*1024))
-	fmt.Printf("  Row Groups:   %d\n", info.NumRowGroups)
+	fmt.Fprintf(os.Stderr, "Parquet File Information:\n")
+	fmt.Fprintf(os.Stderr, "  File:         %s\n", config.ParquetFile)
+	fmt.Fprintf(os.Stderr, "  Rows:         %d\n", info.RowCount)
+	fmt.Fprintf(os.Stderr, "  Columns:      %d\n", info.ColumnCount)
+	fmt.Fprintf(os.Stderr, "  File Size:    %d bytes (%.2f MB)\n", info.FileSize, float64(info.FileSize)/(1024*1024))
+	fmt.Fprintf(os.Stderr, "  Row Groups:   %d\n", info.NumRowGroups)
 
 	return nil
 }
@@ -398,7 +434,7 @@ func formatTailResult(entries []buildkitelogs.ParquetLogEntry, totalRows, entrie
 	}
 
 	// Text format
-	fmt.Printf("Last %d entries:\n\n", entriesRead)
+	fmt.Fprintf(os.Stderr, "Last %d entries:\n\n", entriesRead)
 
 	for _, entry := range entries {
 		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
@@ -426,10 +462,10 @@ func formatTailResult(entries []buildkitelogs.ParquetLogEntry, totalRows, entrie
 	}
 
 	if config.ShowStats {
-		fmt.Printf("\n--- Tail Statistics ---\n")
-		fmt.Printf("Total rows in file: %d\n", totalRows)
-		fmt.Printf("Entries shown: %d\n", entriesRead)
-		fmt.Printf("Query time: %.2f ms\n", queryTime)
+		fmt.Fprintf(os.Stderr, "\n--- Tail Statistics ---\n")
+		fmt.Fprintf(os.Stderr, "Total rows in file: %d\n", totalRows)
+		fmt.Fprintf(os.Stderr, "Entries shown: %d\n", entriesRead)
+		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 
 	return nil
@@ -465,7 +501,7 @@ func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entries
 	if config.LimitEntries > 0 && entriesRead >= int64(config.LimitEntries) {
 		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
 	}
-	fmt.Printf("Entries starting from row %d: %d%s\n\n", startRow, entriesRead, limitText)
+	fmt.Fprintf(os.Stderr, "Entries starting from row %d: %d%s\n\n", startRow, entriesRead, limitText)
 
 	for _, entry := range entries {
 		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
@@ -493,10 +529,10 @@ func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entries
 	}
 
 	if config.ShowStats {
-		fmt.Printf("\n--- Seek Statistics ---\n")
-		fmt.Printf("Start row: %d\n", startRow)
-		fmt.Printf("Entries shown: %d\n", entriesRead)
-		fmt.Printf("Query time: %.2f ms\n", queryTime)
+		fmt.Fprintf(os.Stderr, "\n--- Seek Statistics ---\n")
+		fmt.Fprintf(os.Stderr, "Start row: %d\n", startRow)
+		fmt.Fprintf(os.Stderr, "Entries shown: %d\n", entriesRead)
+		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 
 	return nil

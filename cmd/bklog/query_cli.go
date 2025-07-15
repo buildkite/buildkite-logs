@@ -82,6 +82,8 @@ func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig)
 		return tailFile(reader, config, start)
 	case "seek":
 		return seekToRow(reader, config, start)
+	case "dump":
+		return streamDump(reader, config, start)
 	default:
 		return fmt.Errorf("unknown operation: %s", config.Operation)
 	}
@@ -532,6 +534,97 @@ func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entries
 		fmt.Fprintf(os.Stderr, "\n--- Seek Statistics ---\n")
 		fmt.Fprintf(os.Stderr, "Start row: %d\n", startRow)
 		fmt.Fprintf(os.Stderr, "Entries shown: %d\n", entriesRead)
+		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
+	}
+
+	return nil
+}
+
+// streamDump handles dump operation using streaming to output all entries
+func streamDump(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+	var entries []buildkitelogs.ParquetLogEntry
+	totalEntries := 0
+
+	for entry, err := range reader.ReadEntriesIter() {
+		if err != nil {
+			return fmt.Errorf("error reading entries: %w", err)
+		}
+
+		totalEntries++
+		entries = append(entries, entry)
+
+		// Apply limit if specified (early termination advantage)
+		if config.LimitEntries > 0 && totalEntries >= config.LimitEntries {
+			break
+		}
+	}
+
+	// Format output
+	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
+	return formatDumpResult(entries, totalEntries, queryTime, config)
+}
+
+// formatDumpResult formats dump command output
+func formatDumpResult(entries []buildkitelogs.ParquetLogEntry, totalEntries int, queryTime float64, config *QueryConfig) error {
+	if config.Format == "json" {
+		result := struct {
+			Entries []buildkitelogs.ParquetLogEntry `json:"entries"`
+			Stats   struct {
+				TotalEntries int     `json:"total_entries"`
+				EntriesShown int     `json:"entries_shown"`
+				QueryTime    float64 `json:"query_time_ms"`
+			} `json:"stats,omitempty"`
+		}{
+			Entries: entries,
+		}
+
+		if config.ShowStats {
+			result.Stats.TotalEntries = totalEntries
+			result.Stats.EntriesShown = len(entries)
+			result.Stats.QueryTime = queryTime
+		}
+
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+
+	// Text format
+	limitText := ""
+	if config.LimitEntries > 0 && len(entries) >= config.LimitEntries {
+		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+	}
+	fmt.Fprintf(os.Stderr, "Entries from file: %d%s\n\n", len(entries), limitText)
+
+	for _, entry := range entries {
+		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
+
+		var markers []string
+		if entry.IsCommand {
+			markers = append(markers, "CMD")
+		}
+		if entry.IsGroup {
+			markers = append(markers, "GRP")
+		}
+		if entry.IsProgress {
+			markers = append(markers, "PROG")
+		}
+
+		markerStr := ""
+		if len(markers) > 0 {
+			markerStr = fmt.Sprintf(" [%s]", strings.Join(markers, ","))
+		}
+
+		fmt.Printf("[%s]%s %s\n",
+			timestamp.Format("2006-01-02 15:04:05.000"),
+			markerStr,
+			entry.Content)
+	}
+
+	if config.ShowStats {
+		fmt.Fprintf(os.Stderr, "\n--- Dump Statistics ---\n")
+		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
+		fmt.Fprintf(os.Stderr, "Entries shown: %d\n", len(entries))
 		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 

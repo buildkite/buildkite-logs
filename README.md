@@ -239,6 +239,21 @@ Query time: 0.36 ms
 ./build/bklog query -file output.parquet -op info
 ```
 
+**Dump all entries from the file:**
+```bash
+./build/bklog query -file output.parquet -op dump
+```
+
+**Dump with limited entries:**
+```bash
+./build/bklog query -file output.parquet -op dump -limit 100
+```
+
+**Dump all entries as JSON:**
+```bash
+./build/bklog query -file output.parquet -op dump -format json
+```
+
 #### Buildkite API Integration
 
 The query command now supports direct API integration, automatically downloading and caching logs from Buildkite:
@@ -265,6 +280,12 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op info
+```
+
+**Dump all entries from API logs:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op dump
 ```
 
 Logs are automatically downloaded and cached in `~/.bklog/` as `{org}-{pipeline}-{build}-{job}.parquet` files. Subsequent queries use the cached version unless the cache is manually cleared.
@@ -309,6 +330,16 @@ Output:
 ./build/bklog query -file ./testdata/bash-example.parquet -op tail -tail 7
 ```
 
+**Dump all entries from the test file:**
+```bash
+./build/bklog query -file ./testdata/bash-example.parquet -op dump
+```
+
+**Dump first 10 entries as JSON:**
+```bash
+./build/bklog query -file ./testdata/bash-example.parquet -op dump -limit 10 -format json
+```
+
 ### CLI Options
 
 #### Parse Command
@@ -348,7 +379,7 @@ Output:
 - `-job <id>`: Buildkite job ID (for API access)
 
 **Query Options:**
-- `-op <operation>`: Query operation (`list-groups`, `by-group`, `info`, `tail`, `seek`) (default: `list-groups`)
+- `-op <operation>`: Query operation (`list-groups`, `by-group`, `info`, `tail`, `seek`, `dump`) (default: `list-groups`)
 - `-group <pattern>`: Group name pattern to filter by (for `by-group` operation)
 - `-format <format>`: Output format (`text`, `json`) (default: `text`)
 - `-stats`: Show query statistics (default: `true`)

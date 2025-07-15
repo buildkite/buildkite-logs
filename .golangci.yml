@@ -1,5 +1,13 @@
 version: "2"
 linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - gocritic
   exclusions:
     generated: lax
     presets:
@@ -12,6 +20,14 @@ linters:
       - builtin$
       - examples$
 formatters:
+  enable:
+    - gci
+    - gofmt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
   exclusions:
     generated: lax
     paths:

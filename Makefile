@@ -5,7 +5,7 @@ BINARY_NAME=bklog
 BUILD_DIR=build
 CMD_DIR=cmd/bklog
 VERSION?=dev
-LDFLAGS=-ldflags "-X main.version=$(VERSION)"
+LDFLAGS=-ldflags "-X main.version=$(VERSION) -s -w"
 
 # Go related variables
 GOCMD=go
@@ -44,7 +44,7 @@ lint:
 build:
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	mkdir -p $(BUILD_DIR)
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	$(GOBUILD) $(LDFLAGS) -trimpath -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
 
 # Install dependencies
 .PHONY: deps

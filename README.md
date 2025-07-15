@@ -54,12 +54,12 @@ make clean test lint help
 
 **Manual build:**
 ```bash
-go build -o build/bklog ./cmd/bklog
+make build
 ```
 
-**Build with version information:**
+**Build a snapshot with [goreleaser](https://goreleaser.com/):**
 ```bash
-go build -ldflags "-X main.version=v1.2.3" -o build/bklog ./cmd/bklog
+goreleaser build --snapshot --clean --single-target
 ```
 
 **Check version:**

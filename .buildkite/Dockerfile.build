@@ -1,0 +1,2 @@
+FROM golang:1.24.4@sha256:10c131810f80a4802c49cab0961bbe18a16f4bb2fb99ef16deaa23e4246fc817
+COPY --from=goreleaser/goreleaser:v2.11.0@sha256:1661cf554e5f2f62bc0b68d8bd9ed70d46dff0737c4bc0b70c104dea5d74328a /usr/bin/goreleaser /usr/local/bin/goreleaser

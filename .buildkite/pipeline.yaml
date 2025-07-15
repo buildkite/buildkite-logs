@@ -5,11 +5,29 @@ steps:
       - key: lint
         label: ':golangci-lint: lint'
         plugins:
-          - docker-compose#v5.8.0:
+          - docker-compose#v5.10.0:
+              config: .buildkite/docker-compose.yml
               run: golangci-lint
       - key: test
         label: ':go: test'
         command: go test -v ./...
         plugins:
-          - docker-compose#v5.8.0:
+          - docker-compose#v5.10.0:
+              config: .buildkite/docker-compose.yml
               run: golang
+  - label: ":terminal: build ({{matrix}})"
+    depends_on: quality_checks
+    matrix:
+      - "darwin"
+      - "linux"
+      - "windows"
+    artifact_paths:
+      - dist/**/*
+    command: goreleaser build --snapshot --clean --single-target
+    plugins:
+      - docker-compose#v5.10.0:
+          config: .buildkite/docker-compose.yml
+          entrypoint: /bin/bash
+          env:
+            - GOOS={{matrix}}
+          run: golang

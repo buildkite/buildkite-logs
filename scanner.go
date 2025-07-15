@@ -97,51 +97,81 @@ func (p *ByteParser) StripANSI(content string) string {
 
 	i := 0
 	for i < len(data) {
-		// Check for ANSI escape sequence
-		if i < len(data)-1 && data[i] == 0x1b && data[i+1] == '[' {
-			// Skip ESC[
-			i += 2
-			// Skip until we find the final character (letter)
-			for i < len(data) && !isANSIFinalChar(data[i]) {
-				i++
-			}
-			// Skip the final character
-			if i < len(data) {
-				i++
-			}
-		} else if i < len(data)-1 && data[i] == '[' {
-			// Handle sequences that might be missing ESC
-			j := i + 1
-			hasValidANSI := false
-
-			// Look ahead to see if this looks like an ANSI sequence
-			for j < len(data) && j < i+10 { // Limit lookahead
-				if data[j] >= '0' && data[j] <= '9' || data[j] == ';' {
-					j++
-				} else if isANSIFinalChar(data[j]) {
-					hasValidANSI = true
-					break
-				} else {
-					break
-				}
-			}
-
-			if hasValidANSI {
-				// Skip the ANSI sequence
-				i = j + 1
-			} else {
-				// Not an ANSI sequence, keep the character
-				result = append(result, data[i])
-				i++
-			}
-		} else {
-			// Regular character
-			result = append(result, data[i])
-			i++
+		// Try to handle ANSI escape sequence with ESC[
+		if nextPos := p.skipESCSequence(data, i); nextPos > i {
+			i = nextPos
+			continue
 		}
+
+		// Try to handle sequences that might be missing ESC
+		if nextPos := p.skipBareSequence(data, i); nextPos > i {
+			i = nextPos
+			continue
+		}
+
+		// Regular character - keep it
+		result = append(result, data[i])
+		i++
 	}
 
 	return string(result)
+}
+
+// skipESCSequence checks for and skips ESC[ ANSI sequences
+// Returns the position after the sequence, or the original position if no sequence found
+func (p *ByteParser) skipESCSequence(data []byte, pos int) int {
+	if pos >= len(data)-1 {
+		return pos
+	}
+
+	if data[pos] != 0x1b || data[pos+1] != '[' {
+		return pos
+	}
+
+	// Skip ESC[
+	i := pos + 2
+
+	// Skip until we find the final character (letter)
+	for i < len(data) && !isANSIFinalChar(data[i]) {
+		i++
+	}
+
+	// Skip the final character
+	if i < len(data) {
+		i++
+	}
+
+	return i
+}
+
+// skipBareSequence checks for and skips bare [ sequences that look like ANSI
+// Returns the position after the sequence, or the original position if no sequence found
+func (p *ByteParser) skipBareSequence(data []byte, pos int) int {
+	if pos >= len(data)-1 || data[pos] != '[' {
+		return pos
+	}
+
+	// Look ahead to see if this looks like an ANSI sequence
+	j := pos + 1
+	for j < len(data) && j < pos+10 { // Limit lookahead
+		if p.isANSIParam(data[j]) {
+			j++
+			continue
+		}
+
+		if isANSIFinalChar(data[j]) {
+			return j + 1 // Skip the ANSI sequence
+		}
+
+		break // Not an ANSI sequence
+	}
+
+	return pos // No valid ANSI sequence found
+}
+
+// isANSIParam checks if a byte is a valid ANSI parameter character
+func (p *ByteParser) isANSIParam(b byte) bool {
+	return (b >= '0' && b <= '9') || b == ';'
 }
 
 // isANSIFinalChar checks if a byte is a valid ANSI sequence final character

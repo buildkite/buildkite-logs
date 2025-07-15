@@ -6,3 +6,4 @@
 cmd/bklog/bklog
 # Added by goreleaser init:
 dist/
+/.envrc*

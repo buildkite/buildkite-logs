@@ -192,6 +192,37 @@ Total groups: 5
 Query time: 2.36 ms
 ```
 
+**List all command entries:**
+```bash
+./build/bklog query -file output.parquet -op list-commands
+```
+Output:
+```
+Commands found: 15
+
+[2025-04-22 21:43:29.921] [~~~ Running global environment hook] $ /buildkite/agent/hooks/environment
+[2025-04-22 21:43:29.949] [~~~ Running global pre-checkout hook] $ /buildkite/agent/hooks/pre-checkout
+[2025-04-22 21:43:29.975] [~~~ Preparing working directory] $ cd /buildkite/builds/g01mvtp4g0vi2-1/test/bash-example
+[2025-04-22 21:43:29.975] [~~~ Preparing working directory] $ git clone -v -- https://github.com/buildkite/bash-example.git .
+[2025-04-22 21:43:30.349] [~~~ Preparing working directory] $ git clean -ffxdq
+...
+
+--- Command Query Statistics (Streaming) ---
+Total entries: 212
+Total commands: 15
+Query time: 1.08 ms
+```
+
+**List first 5 commands in JSON format:**
+```bash
+./build/bklog query -file output.parquet -op list-commands -format json -limit 5
+```
+
+**List commands without statistics:**
+```bash
+./build/bklog query -file output.parquet -op list-commands -stats=false
+```
+
 **Filter entries by group pattern:**
 ```bash
 ./build/bklog query -file output.parquet -op by-group -group "environment"
@@ -262,6 +293,12 @@ The query command now supports direct API integration, automatically downloading
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-groups
+```
+
+**Query commands directly from Buildkite API:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-commands
 ```
 
 **Query specific group from API logs:**
@@ -379,7 +416,7 @@ Output:
 - `-job <id>`: Buildkite job ID (for API access)
 
 **Query Options:**
-- `-op <operation>`: Query operation (`list-groups`, `by-group`, `info`, `tail`, `seek`, `dump`) (default: `list-groups`)
+- `-op <operation>`: Query operation (`list-groups`, `list-commands`, `by-group`, `info`, `tail`, `seek`, `dump`) (default: `list-groups`)
 - `-group <pattern>`: Group name pattern to filter by (for `by-group` operation)
 - `-format <format>`: Output format (`text`, `json`) (default: `text`)
 - `-stats`: Show query statistics (default: `true`)

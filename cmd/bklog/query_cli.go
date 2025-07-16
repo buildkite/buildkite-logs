@@ -71,6 +71,8 @@ func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig)
 	switch config.Operation {
 	case "list-groups":
 		return streamListGroups(reader, config, start)
+	case "list-commands":
+		return streamListCommands(reader, config, start)
 	case "by-group":
 		if config.GroupName == "" {
 			return fmt.Errorf("group pattern is required for by-group operation")
@@ -154,6 +156,36 @@ func streamListGroups(reader *buildkitelogs.ParquetReader, config *QueryConfig, 
 	// Format output
 	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
 	return formatStreamingGroupsResult(groups, totalEntries, queryTime, config)
+}
+
+// streamListCommands handles list-commands operation using streaming
+func streamListCommands(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+	var commands []buildkitelogs.ParquetLogEntry
+	totalEntries := 0
+	commandCount := 0
+
+	for entry, err := range reader.ReadEntriesIter() {
+		if err != nil {
+			return fmt.Errorf("error reading entries: %w", err)
+		}
+
+		totalEntries++
+
+		// Filter for command entries only
+		if entry.IsCommand {
+			commandCount++
+			commands = append(commands, entry)
+
+			// Apply limit if specified (early termination advantage)
+			if config.LimitEntries > 0 && commandCount >= config.LimitEntries {
+				break
+			}
+		}
+	}
+
+	// Format output
+	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
+	return formatStreamingCommandsResult(commands, totalEntries, commandCount, queryTime, config)
 }
 
 // streamByGroup handles by-group operation using streaming with optional limiting
@@ -241,6 +273,68 @@ func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries 
 		fmt.Fprintf(os.Stderr, "\n--- Query Statistics (Streaming) ---\n")
 		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
 		fmt.Fprintf(os.Stderr, "Total groups: %d\n", len(groups))
+		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
+	}
+
+	return nil
+}
+
+// formatStreamingCommandsResult formats commands output from streaming query
+func formatStreamingCommandsResult(commands []buildkitelogs.ParquetLogEntry, totalEntries, commandCount int, queryTime float64, config *QueryConfig) error {
+	if config.Format == "json" {
+		result := struct {
+			Commands []buildkitelogs.ParquetLogEntry `json:"commands"`
+			Stats    struct {
+				TotalEntries  int     `json:"total_entries"`
+				TotalCommands int     `json:"total_commands"`
+				QueryTime     float64 `json:"query_time_ms"`
+			} `json:"stats,omitempty"`
+		}{
+			Commands: commands,
+		}
+
+		if config.ShowStats {
+			result.Stats.TotalEntries = totalEntries
+			result.Stats.TotalCommands = commandCount
+			result.Stats.QueryTime = queryTime
+		}
+
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+
+	// Text format
+	limitText := ""
+	if config.LimitEntries > 0 && commandCount >= config.LimitEntries {
+		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+	}
+	fmt.Fprintf(os.Stderr, "Commands found: %d%s\n\n", commandCount, limitText)
+
+	if len(commands) == 0 {
+		fmt.Fprintln(os.Stderr, "No commands found.")
+		return nil
+	}
+
+	for _, command := range commands {
+		timestamp := time.Unix(0, command.Timestamp*int64(time.Millisecond))
+
+		if command.Group != "" {
+			fmt.Printf("[%s] [%s] %s\n",
+				timestamp.Format("2006-01-02 15:04:05.000"),
+				command.Group,
+				command.Content)
+		} else {
+			fmt.Printf("[%s] %s\n",
+				timestamp.Format("2006-01-02 15:04:05.000"),
+				command.Content)
+		}
+	}
+
+	if config.ShowStats {
+		fmt.Fprintf(os.Stderr, "\n--- Command Query Statistics (Streaming) ---\n")
+		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
+		fmt.Fprintf(os.Stderr, "Total commands: %d\n", commandCount)
 		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 

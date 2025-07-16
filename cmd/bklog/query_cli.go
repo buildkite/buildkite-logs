@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,13 @@ type QueryConfig struct {
 	LimitEntries int   // Limit output entries (0 = no limit)
 	TailLines    int   // Number of lines to show from end (for tail operation)
 	SeekToRow    int64 // Row number to seek to (0-based)
+	// Search operation parameters
+	SearchPattern string // Regex pattern to search for
+	AfterContext  int    // Lines to show after match
+	BeforeContext int    // Lines to show before match
+	Context       int    // Lines to show before and after match
+	CaseSensitive bool   // Case-sensitive search
+	InvertMatch   bool   // Show non-matching lines
 	// Buildkite API parameters
 	Organization string
 	Pipeline     string
@@ -78,6 +86,11 @@ func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig)
 			return fmt.Errorf("group pattern is required for by-group operation")
 		}
 		return streamByGroup(reader, config, start)
+	case "search":
+		if config.SearchPattern == "" {
+			return fmt.Errorf("pattern is required for search operation")
+		}
+		return streamSearch(reader, config, start)
 	case "info":
 		return showFileInfo(reader, config)
 	case "tail":
@@ -186,6 +199,110 @@ func streamListCommands(reader *buildkitelogs.ParquetReader, config *QueryConfig
 	// Format output
 	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
 	return formatStreamingCommandsResult(commands, totalEntries, commandCount, queryTime, config)
+}
+
+// streamSearch handles search operation using streaming with regex pattern matching and context lines
+func streamSearch(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+	// Import regex package
+	regex, err := compileRegex(config.SearchPattern, config.CaseSensitive)
+	if err != nil {
+		return fmt.Errorf("invalid regex pattern: %w", err)
+	}
+
+	// Determine context lines
+	beforeContext := config.BeforeContext
+	afterContext := config.AfterContext
+	if config.Context > 0 {
+		beforeContext = config.Context
+		afterContext = config.Context
+	}
+
+	var matches []SearchMatch
+	var beforeBuffer []buildkitelogs.ParquetLogEntry
+	totalEntries := 0
+	matchesFound := 0
+	afterCollecting := 0
+	var currentMatch *SearchMatch
+
+	for entry, err := range reader.ReadEntriesIter() {
+		if err != nil {
+			return fmt.Errorf("error reading entries: %w", err)
+		}
+
+		totalEntries++
+
+		// Check if we're currently collecting after-context for a previous match
+		if afterCollecting > 0 && currentMatch != nil {
+			currentMatch.AfterContext = append(currentMatch.AfterContext, entry)
+			afterCollecting--
+			if afterCollecting == 0 {
+				currentMatch = nil
+			}
+		}
+
+		// Test if current entry matches the pattern
+		isMatch := regex.MatchString(entry.Content)
+		if config.InvertMatch {
+			isMatch = !isMatch
+		}
+
+		if isMatch {
+			matchesFound++
+			
+			// Create new match with before context
+			match := SearchMatch{
+				MatchEntry:     entry,
+				BeforeContext:  make([]buildkitelogs.ParquetLogEntry, len(beforeBuffer)),
+				AfterContext:   make([]buildkitelogs.ParquetLogEntry, 0, afterContext),
+				LineNumber:     int64(totalEntries - 1),
+			}
+			copy(match.BeforeContext, beforeBuffer)
+			
+			matches = append(matches, match)
+			
+			// Set up after-context collection
+			if afterContext > 0 {
+				currentMatch = &matches[len(matches)-1]
+				afterCollecting = afterContext
+			}
+
+			// Clear before buffer after match
+			beforeBuffer = beforeBuffer[:0]
+
+			// Apply limit if specified
+			if config.LimitEntries > 0 && matchesFound >= config.LimitEntries {
+				break
+			}
+		} else {
+			// Maintain rolling before-context buffer
+			if beforeContext > 0 {
+				if len(beforeBuffer) >= beforeContext {
+					beforeBuffer = beforeBuffer[1:]
+				}
+				beforeBuffer = append(beforeBuffer, entry)
+			}
+		}
+	}
+
+	// Format output
+	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
+	return formatSearchResult(matches, totalEntries, matchesFound, queryTime, config)
+}
+
+// SearchMatch represents a single search match with context
+type SearchMatch struct {
+	MatchEntry     buildkitelogs.ParquetLogEntry   `json:"match"`
+	BeforeContext  []buildkitelogs.ParquetLogEntry `json:"before_context,omitempty"`
+	AfterContext   []buildkitelogs.ParquetLogEntry `json:"after_context,omitempty"`
+	LineNumber     int64                           `json:"line_number"`
+}
+
+// compileRegex compiles a regex pattern with optional case sensitivity
+func compileRegex(pattern string, caseSensitive bool) (*regexp.Regexp, error) {
+	if !caseSensitive {
+		pattern = "(?i)" + pattern
+	}
+	return regexp.Compile(pattern)
 }
 
 // streamByGroup handles by-group operation using streaming with optional limiting
@@ -335,6 +452,102 @@ func formatStreamingCommandsResult(commands []buildkitelogs.ParquetLogEntry, tot
 		fmt.Fprintf(os.Stderr, "\n--- Command Query Statistics (Streaming) ---\n")
 		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
 		fmt.Fprintf(os.Stderr, "Total commands: %d\n", commandCount)
+		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
+	}
+
+	return nil
+}
+
+// formatSearchResult formats search results with context lines
+func formatSearchResult(matches []SearchMatch, totalEntries, matchesFound int, queryTime float64, config *QueryConfig) error {
+	if config.Format == "json" {
+		result := struct {
+			Matches []SearchMatch `json:"matches"`
+			Stats   struct {
+				TotalEntries  int     `json:"total_entries"`
+				MatchesFound  int     `json:"matches_found"`
+				QueryTime     float64 `json:"query_time_ms"`
+			} `json:"stats,omitempty"`
+		}{
+			Matches: matches,
+		}
+
+		if config.ShowStats {
+			result.Stats.TotalEntries = totalEntries
+			result.Stats.MatchesFound = matchesFound
+			result.Stats.QueryTime = queryTime
+		}
+
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+
+	// Text format
+	limitText := ""
+	if config.LimitEntries > 0 && matchesFound >= config.LimitEntries {
+		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+	}
+	fmt.Fprintf(os.Stderr, "Matches found: %d%s\n\n", matchesFound, limitText)
+
+	if len(matches) == 0 {
+		fmt.Fprintln(os.Stderr, "No matches found.")
+		return nil
+	}
+
+	for i, match := range matches {
+		if i > 0 {
+			fmt.Println("--")
+		}
+
+		// Print before context
+		for _, entry := range match.BeforeContext {
+			timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
+			if entry.Group != "" {
+				fmt.Printf("[%s] [%s] %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					entry.Group,
+					entry.Content)
+			} else {
+				fmt.Printf("[%s] %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					entry.Content)
+			}
+		}
+
+		// Print match line (highlighted)
+		timestamp := time.Unix(0, match.MatchEntry.Timestamp*int64(time.Millisecond))
+		if match.MatchEntry.Group != "" {
+			fmt.Printf("[%s] [%s] MATCH: %s\n",
+				timestamp.Format("2006-01-02 15:04:05.000"),
+				match.MatchEntry.Group,
+				match.MatchEntry.Content)
+		} else {
+			fmt.Printf("[%s] MATCH: %s\n",
+				timestamp.Format("2006-01-02 15:04:05.000"),
+				match.MatchEntry.Content)
+		}
+
+		// Print after context
+		for _, entry := range match.AfterContext {
+			timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
+			if entry.Group != "" {
+				fmt.Printf("[%s] [%s] %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					entry.Group,
+					entry.Content)
+			} else {
+				fmt.Printf("[%s] %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					entry.Content)
+			}
+		}
+	}
+
+	if config.ShowStats {
+		fmt.Fprintf(os.Stderr, "\n--- Search Statistics (Streaming) ---\n")
+		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
+		fmt.Fprintf(os.Stderr, "Matches found: %d\n", matchesFound)
 		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 

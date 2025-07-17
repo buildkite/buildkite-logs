@@ -339,68 +339,6 @@ func BenchmarkIteratorComparison(b *testing.B) {
 	})
 }
 
-// BenchmarkParquetExport tests Parquet export performance
-func BenchmarkParquetExport(b *testing.B) {
-	sizes := []int{100, 1000, 10000}
-
-	for _, size := range sizes {
-		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
-			data := generateTestData(size)
-			parser := NewParser()
-
-			// Pre-parse entries to isolate export performance
-			reader := strings.NewReader(data)
-			var entries []*LogEntry
-			for entry, err := range parser.All(reader) {
-				if err != nil {
-					b.Fatal(err)
-				}
-				entries = append(entries, entry)
-			}
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				filename := fmt.Sprintf("bench_test_%d_%d.parquet", size, i)
-
-				err := ExportToParquet(entries, filename)
-				if err != nil {
-					b.Fatal(err)
-				}
-
-				// Cleanup
-				_ = os.Remove(filename) // Ignore error in benchmark cleanup
-			}
-		})
-	}
-}
-
-// BenchmarkParquetIteratorExport tests iterator-based Parquet export
-func BenchmarkParquetIteratorExport(b *testing.B) {
-	sizes := []int{100, 1000, 10000}
-
-	for _, size := range sizes {
-		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
-			data := generateTestData(size)
-			parser := NewParser()
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				reader := strings.NewReader(data)
-				iterator := parser.NewIterator(reader)
-				filename := fmt.Sprintf("bench_iter_%d_%d.parquet", size, i)
-
-				err := ExportIteratorToParquet(iterator, filename)
-				if err != nil {
-					b.Fatal(err)
-				}
-
-				// Cleanup
-				_ = os.Remove(filename) // Ignore error in benchmark cleanup
-			}
-		})
-	}
-}
-
 // BenchmarkParquetSeq2Export tests Seq2-based Parquet export
 func BenchmarkParquetSeq2Export(b *testing.B) {
 	sizes := []int{100, 1000, 10000}
@@ -425,67 +363,6 @@ func BenchmarkParquetSeq2Export(b *testing.B) {
 			}
 		})
 	}
-}
-
-// BenchmarkParquetExportComparison compares different Parquet export methods
-func BenchmarkParquetExportComparison(b *testing.B) {
-	data := generateTestData(1000)
-	parser := NewParser()
-
-	// Pre-parse for slice-based export
-	reader := strings.NewReader(data)
-	var entries []*LogEntry
-	for entry, err := range parser.All(reader) {
-		if err != nil {
-			b.Fatal(err)
-		}
-		entries = append(entries, entry)
-	}
-
-	b.Run("slice_export", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			filename := fmt.Sprintf("bench_slice_%d.parquet", i)
-
-			err := ExportToParquet(entries, filename)
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			_ = os.Remove(filename) // Ignore error in benchmark cleanup
-		}
-	})
-
-	b.Run("iterator_export", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			reader := strings.NewReader(data)
-			iterator := parser.NewIterator(reader)
-			filename := fmt.Sprintf("bench_iter_%d.parquet", i)
-
-			err := ExportIteratorToParquet(iterator, filename)
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			_ = os.Remove(filename) // Ignore error in benchmark cleanup
-		}
-	})
-
-	b.Run("seq2_export", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			reader := strings.NewReader(data)
-			filename := fmt.Sprintf("bench_seq2_%d.parquet", i)
-
-			err := ExportSeq2ToParquet(parser.All(reader), filename)
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			_ = os.Remove(filename) // Ignore error in benchmark cleanup
-		}
-	})
 }
 
 // BenchmarkParquetWithFiltering tests filtered Parquet export performance

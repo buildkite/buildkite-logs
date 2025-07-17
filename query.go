@@ -6,6 +6,7 @@ import (
 	"io"
 	"iter"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,6 +36,24 @@ type GroupInfo struct {
 	LastSeen   time.Time `json:"last_seen"`
 	Commands   int       `json:"commands"`
 	Progress   int       `json:"progress"`
+}
+
+// SearchOptions configures regex search behavior
+type SearchOptions struct {
+	Pattern       string // Regex pattern to search for
+	CaseSensitive bool   // Enable case-sensitive matching
+	InvertMatch   bool   // Show non-matching lines
+	BeforeContext int    // Lines to show before match
+	AfterContext  int    // Lines to show after match
+	Context       int    // Lines to show before and after (overrides BeforeContext/AfterContext)
+}
+
+// SearchResult represents a match with context lines
+type SearchResult struct {
+	Match         ParquetLogEntry   `json:"match"`
+	BeforeContext []ParquetLogEntry `json:"before_context,omitempty"`
+	AfterContext  []ParquetLogEntry `json:"after_context,omitempty"`
+	LineNumber    int64             `json:"line_number"`
 }
 
 // QueryStats contains performance and result statistics for queries
@@ -90,6 +109,11 @@ func (pr *ParquetReader) SeekToRow(startRow int64) iter.Seq2[ParquetLogEntry, er
 // GetFileInfo returns metadata about the Parquet file
 func (pr *ParquetReader) GetFileInfo() (*ParquetFileInfo, error) {
 	return getParquetFileInfo(pr.filename)
+}
+
+// SearchEntriesIter returns an iterator over search results with context
+func (pr *ParquetReader) SearchEntriesIter(options SearchOptions) iter.Seq2[SearchResult, error] {
+	return searchParquetFileIter(pr.filename, options)
 }
 
 // ReadParquetFileIter is a convenience function to get an iterator over entries from a Parquet file
@@ -500,4 +524,101 @@ func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[Parqu
 			}
 		}
 	}
+}
+
+// searchParquetFileIter implements streaming search with context
+func searchParquetFileIter(filename string, options SearchOptions) iter.Seq2[SearchResult, error] {
+	return func(yield func(SearchResult, error) bool) {
+		// Compile regex pattern
+		regex, err := compileRegexPattern(options.Pattern, options.CaseSensitive)
+		if err != nil {
+			yield(SearchResult{}, fmt.Errorf("invalid regex: %w", err))
+			return
+		}
+
+		// Determine context lines
+		beforeContext := options.BeforeContext
+		afterContext := options.AfterContext
+		if options.Context > 0 {
+			beforeContext = options.Context
+			afterContext = options.Context
+		}
+
+		// Stream entries and perform search with context buffering
+		var beforeBuffer []ParquetLogEntry
+		var afterCollecting int
+		var currentResult *SearchResult
+		totalEntries := int64(0)
+
+		for entry, err := range readParquetFileIter(filename) {
+			if err != nil {
+				yield(SearchResult{}, err)
+				return
+			}
+
+			totalEntries++
+
+			// Handle after-context collection
+			if afterCollecting > 0 && currentResult != nil {
+				currentResult.AfterContext = append(currentResult.AfterContext, entry)
+				afterCollecting--
+				if afterCollecting == 0 {
+					// Yield the completed result
+					if !yield(*currentResult, nil) {
+						return
+					}
+					currentResult = nil
+				}
+			}
+
+			// Test match
+			isMatch := regex.MatchString(entry.Content)
+			if options.InvertMatch {
+				isMatch = !isMatch
+			}
+
+			if isMatch {
+				result := SearchResult{
+					Match:         entry,
+					BeforeContext: make([]ParquetLogEntry, len(beforeBuffer)),
+					AfterContext:  make([]ParquetLogEntry, 0, afterContext),
+					LineNumber:    totalEntries - 1,
+				}
+				copy(result.BeforeContext, beforeBuffer)
+
+				// If no after-context needed, yield immediately
+				if afterContext == 0 {
+					if !yield(result, nil) {
+						return
+					}
+				} else {
+					// Set up after-context collection
+					currentResult = &result
+					afterCollecting = afterContext
+				}
+
+				// Clear before buffer after match
+				beforeBuffer = beforeBuffer[:0]
+			} else if beforeContext > 0 {
+				// Maintain rolling before-context buffer
+				if len(beforeBuffer) >= beforeContext {
+					beforeBuffer = beforeBuffer[1:]
+				}
+				beforeBuffer = append(beforeBuffer, entry)
+			}
+		}
+
+		// If we have a pending result waiting for after-context, yield it
+		if currentResult != nil {
+			yield(*currentResult, nil)
+		}
+	}
+}
+
+// compileRegexPattern compiles a regex pattern with optional case sensitivity
+func compileRegexPattern(pattern string, caseSensitive bool) (*regexp.Regexp, error) {
+	if !caseSensitive {
+		pattern = "(?i)" + pattern
+	}
+	return regexp.Compile(pattern)
 }

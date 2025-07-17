@@ -240,6 +240,67 @@ Matched entries: 2
 Query time: 0.36 ms
 ```
 
+**Search entries using regex patterns:**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "git clone"
+```
+Output:
+```
+Matches found: 1
+
+[2025-04-22 21:43:29.975] [~~~ Preparing working directory] MATCH: $ git clone -v -- https://github.com/buildkite/bash-example.git .
+
+--- Search Statistics (Streaming) ---
+Total entries: 212
+Matches found: 1
+Query time: 0.65 ms
+```
+
+**Search with context lines (ripgrep-style):**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "error|failed" -C 3
+```
+Output:
+```
+Matches found: 2
+
+[2025-04-22 21:43:30.690] [~~~ Running script] Running tests...
+[2025-04-22 21:43:30.691] [~~~ Running script] Test suite started
+[2025-04-22 21:43:30.692] [~~~ Running script] Running unit tests
+[2025-04-22 21:43:30.693] [~~~ Running script] MATCH: Test failed: authentication error
+[2025-04-22 21:43:30.694] [~~~ Running script] Cleaning up test files
+[2025-04-22 21:43:30.695] [~~~ Running script] Test run completed
+[2025-04-22 21:43:30.696] [~~~ Running script] Generating report
+--
+[2025-04-22 21:43:30.750] [~~~ Post-processing] Validating results
+[2025-04-22 21:43:30.751] [~~~ Post-processing] Checking exit codes
+[2025-04-22 21:43:30.752] [~~~ Post-processing] Build status: some tests failed
+[2025-04-22 21:43:30.753] [~~~ Post-processing] MATCH: Build failed due to test failures
+[2025-04-22 21:43:30.754] [~~~ Post-processing] Uploading logs
+[2025-04-22 21:43:30.755] [~~~ Post-processing] Notifying team
+[2025-04-22 21:43:30.756] [~~~ Post-processing] Cleanup completed
+```
+
+**Search with separate before/after context:**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "npm install" -B 2 -A 5
+```
+
+**Case-sensitive search:**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "ERROR" --case-sensitive
+```
+
+**Invert match (show non-matching lines):**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "buildkite" --invert-match -limit 5
+```
+
+**Search with JSON output:**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "git clone" -format json -C 1
+```
+
 **JSON output for programmatic use:**
 ```bash
 ./build/bklog query -file output.parquet -op list-groups -format json
@@ -305,6 +366,18 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op by-group -group "tests"
+```
+
+**Search API logs with regex patterns:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "error|failed" -C 2
+```
+
+**Search API logs with case sensitivity:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "ERROR" --case-sensitive
 ```
 
 **Query last 10 entries from API logs:**
@@ -416,13 +489,21 @@ Output:
 - `-job <id>`: Buildkite job ID (for API access)
 
 **Query Options:**
-- `-op <operation>`: Query operation (`list-groups`, `list-commands`, `by-group`, `info`, `tail`, `seek`, `dump`) (default: `list-groups`)
+- `-op <operation>`: Query operation (`list-groups`, `list-commands`, `by-group`, `search`, `info`, `tail`, `seek`, `dump`) (default: `list-groups`)
 - `-group <pattern>`: Group name pattern to filter by (for `by-group` operation)
 - `-format <format>`: Output format (`text`, `json`) (default: `text`)
 - `-stats`: Show query statistics (default: `true`)
 - `-limit <number>`: Limit number of entries returned (0 = no limit, enables early termination)
 - `-tail <number>`: Number of lines to show from end (for `tail` operation, default: 10)
 - `-seek <row>`: Row number to seek to (0-based, for `seek` operation)
+
+**Search Options:**
+- `-pattern <regex>`: Regex pattern to search for (for `search` operation)
+- `-A <num>`: Show NUM lines after each match (ripgrep-style)
+- `-B <num>`: Show NUM lines before each match (ripgrep-style)
+- `-C <num>`: Show NUM lines before and after each match (ripgrep-style)
+- `-case-sensitive`: Enable case-sensitive search (default: case-insensitive)
+- `-invert-match`: Show non-matching lines instead of matching ones
 
 **Note:** For API usage, set `BUILDKITE_API_TOKEN` environment variable. Logs are automatically downloaded and cached in `~/.bklog/`.
 

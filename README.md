@@ -559,9 +559,17 @@ The exported Parquet files contain the following columns:
 | `timestamp` | int64 | Unix timestamp in milliseconds |
 | `content` | string | Log content after OSC sequence |
 | `group` | string | Current build group/section |
-| `has_timestamp` | bool | Whether entry has a valid timestamp |
-| `is_command` | bool | Whether entry is a shell command |
-| `is_group` | bool | Whether entry is a group header |
+| `flags` | int32 | Bitwise flags field (HasTimestamp=1, IsCommand=2, IsGroup=4) |
+
+### Flags Field
+
+The `flags` column uses bitwise operations to efficiently store multiple boolean properties:
+
+| Flag | Bit Position | Value | Description |
+|------|-------------|--------|-------------|
+| `HasTimestamp` | 0 | 1 | Entry has a valid timestamp |
+| `IsCommand` | 1 | 2 | Entry is a shell command |
+| `IsGroup` | 2 | 4 | Entry is a group header |
 
 ### Usage Examples
 
@@ -580,21 +588,6 @@ The exported Parquet files contain the following columns:
 ./build/bklog -file buildkite.log -parquet output.parquet -summary
 ```
 This uses the modern `iter.Seq2[*LogEntry, error]` iterator pattern for memory-efficient processing.
-
-**Analyze with Python/Pandas:**
-```python
-import pandas as pd
-
-# Load Parquet file
-df = pd.read_parquet('output.parquet')
-
-# Filter commands by group
-commands = df[(df['is_command'] == True) & (df['group'].str.contains('tests'))]
-
-# Analyze build timing
-df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
-print(df.groupby('group')['datetime'].agg(['min', 'max', 'count']))
-```
 
 ## API Reference
 
@@ -682,14 +675,29 @@ func (pr *ParquetReader) FilterByGroupIter(groupPattern string) iter.Seq2[Parque
 #### Query Result Types
 ```go
 type ParquetLogEntry struct {
-    Timestamp   int64  `json:"timestamp"`      // Unix timestamp in milliseconds
-    Content     string `json:"content"`        // Log content
-    Group       string `json:"group"`          // Associated group/section
-    HasTime     bool   `json:"has_timestamp"`  // Whether entry has timestamp
-    IsCommand   bool   `json:"is_command"`     // Whether entry is a command
-    IsGroup     bool   `json:"is_group"`       // Whether entry is a group header
-
+    Timestamp   int64    `json:"timestamp"`    // Unix timestamp in milliseconds
+    Content     string   `json:"content"`      // Log content
+    Group       string   `json:"group"`        // Associated group/section
+    Flags       LogFlags `json:"flags"`        // Bitwise flags (HasTimestamp=1, IsCommand=2, IsGroup=4)
 }
+
+// Backward-compatible methods
+func (entry *ParquetLogEntry) HasTime() bool      // Returns Flags.HasTimestamp()
+func (entry *ParquetLogEntry) IsCommand() bool    // Returns Flags.IsCommand()
+func (entry *ParquetLogEntry) IsGroup() bool      // Returns Flags.IsGroup()
+
+type LogFlags int32
+
+// Bitwise flag operations
+func (lf LogFlags) Has(flag LogFlag) bool         // Check if flag is set
+func (lf *LogFlags) Set(flag LogFlag)             // Set flag
+func (lf *LogFlags) Clear(flag LogFlag)           // Clear flag
+func (lf *LogFlags) Toggle(flag LogFlag)          // Toggle flag
+
+// Convenience methods
+func (lf LogFlags) HasTimestamp() bool            // Check HasTimestamp flag
+func (lf LogFlags) IsCommand() bool               // Check IsCommand flag  
+func (lf LogFlags) IsGroup() bool                 // Check IsGroup flag
 
 type GroupInfo struct {
     Name       string    `json:"name"`          // Group/section name

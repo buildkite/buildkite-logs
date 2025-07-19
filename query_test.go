@@ -114,9 +114,6 @@ func TestParquetReader(t *testing.T) {
 			if entry.IsCommand {
 				info.Commands++
 			}
-			if entry.IsProgress {
-				info.Progress++
-			}
 
 			// Stop after processing some entries for test performance
 			if totalEntries >= 100 {
@@ -222,9 +219,6 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 
 		if entry.IsCommand {
 			info.Commands++
-		}
-		if entry.IsProgress {
-			info.Progress++
 		}
 	}
 

@@ -145,25 +145,6 @@ func (entry *LogEntry) IsCommand() bool {
 	return strings.HasPrefix(clean, "$ ")
 }
 
-// IsProgress returns true if the log entry appears to be a progress update
-// Progress lines are identified by [K (erase-in-line) sequences anywhere in the content,
-// but more conservatively than before - looking for the specific pattern where [K
-// appears in contexts that indicate terminal progress updates
-func (entry *LogEntry) IsProgress() bool {
-	content := entry.Content
-
-	// Look for [K sequences in the content
-	if !strings.Contains(content, "[K") {
-		return false
-	}
-
-	// Additional validation: should be git progress-related content
-	cleanContent := entry.CleanContent()
-	return strings.Contains(cleanContent, "objects") ||
-		strings.Contains(cleanContent, "deltas") ||
-		strings.Contains(cleanContent, "%")
-}
-
 // IsGroup returns true if the log entry appears to be a group header
 func (entry *LogEntry) IsGroup() bool {
 	content := entry.CleanContent()

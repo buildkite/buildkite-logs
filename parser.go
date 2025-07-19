@@ -148,7 +148,7 @@ func (entry *LogEntry) IsCommand() bool {
 // IsGroup returns true if the log entry appears to be a group header
 func (entry *LogEntry) IsGroup() bool {
 	content := entry.CleanContent()
-	return strings.HasPrefix(content, "~~~") || strings.HasPrefix(content, "---") || strings.HasPrefix(content, "+++")
+	return strings.HasPrefix(content, "~~~ ") || strings.HasPrefix(content, "--- ") || strings.HasPrefix(content, "+++ ")
 }
 
 // IsSection is deprecated, use IsGroup instead

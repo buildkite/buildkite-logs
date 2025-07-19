@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -264,29 +265,20 @@ func streamByGroup(reader *buildkitelogs.ParquetReader, config *QueryConfig, sta
 	return formatStreamingEntriesResult(entries, totalEntries, matchedEntries, queryTime, config)
 }
 
+func writeJSONLines[T any](entries []T, writer io.Writer) error {
+	encoder := json.NewEncoder(writer)
+	for _, entry := range entries {
+		if err := encoder.Encode(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // formatStreamingGroupsResult formats groups output from streaming query
 func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries int, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
-		result := struct {
-			Groups []buildkitelogs.GroupInfo `json:"groups"`
-			Stats  struct {
-				TotalEntries int     `json:"total_entries"`
-				TotalGroups  int     `json:"total_groups"`
-				QueryTime    float64 `json:"query_time_ms"`
-			} `json:"stats,omitempty"`
-		}{
-			Groups: groups,
-		}
-
-		if config.ShowStats {
-			result.Stats.TotalEntries = totalEntries
-			result.Stats.TotalGroups = len(groups)
-			result.Stats.QueryTime = queryTime
-		}
-
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return writeJSONLines(groups, io.Writer(os.Stdout))
 	}
 
 	// Text format
@@ -324,26 +316,7 @@ func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries 
 // formatStreamingCommandsResult formats commands output from streaming query
 func formatStreamingCommandsResult(commands []buildkitelogs.ParquetLogEntry, totalEntries, commandCount int, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
-		result := struct {
-			Commands []buildkitelogs.ParquetLogEntry `json:"commands"`
-			Stats    struct {
-				TotalEntries  int     `json:"total_entries"`
-				TotalCommands int     `json:"total_commands"`
-				QueryTime     float64 `json:"query_time_ms"`
-			} `json:"stats,omitempty"`
-		}{
-			Commands: commands,
-		}
-
-		if config.ShowStats {
-			result.Stats.TotalEntries = totalEntries
-			result.Stats.TotalCommands = commandCount
-			result.Stats.QueryTime = queryTime
-		}
-
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return writeJSONLines(commands, os.Stdout)
 	}
 
 	// Text format
@@ -386,24 +359,7 @@ func formatStreamingCommandsResult(commands []buildkitelogs.ParquetLogEntry, tot
 // formatSearchResultsLibrary formats search results with context lines using library types
 func formatSearchResultsLibrary(results []buildkitelogs.SearchResult, matchesFound int, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
-		result := struct {
-			Matches []buildkitelogs.SearchResult `json:"matches"`
-			Stats   struct {
-				MatchesFound int     `json:"matches_found"`
-				QueryTime    float64 `json:"query_time_ms"`
-			} `json:"stats,omitempty"`
-		}{
-			Matches: results,
-		}
-
-		if config.ShowStats {
-			result.Stats.MatchesFound = matchesFound
-			result.Stats.QueryTime = queryTime
-		}
-
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return writeJSONLines(results, os.Stdout)
 	}
 
 	// Text format
@@ -479,26 +435,7 @@ func formatSearchResultsLibrary(results []buildkitelogs.SearchResult, matchesFou
 // formatStreamingEntriesResult formats entries output from streaming query
 func formatStreamingEntriesResult(entries []buildkitelogs.ParquetLogEntry, totalEntries, matchedEntries int, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
-		result := struct {
-			Entries []buildkitelogs.ParquetLogEntry `json:"entries"`
-			Stats   struct {
-				TotalEntries   int     `json:"total_entries"`
-				MatchedEntries int     `json:"matched_entries"`
-				QueryTime      float64 `json:"query_time_ms"`
-			} `json:"stats,omitempty"`
-		}{
-			Entries: entries,
-		}
-
-		if config.ShowStats {
-			result.Stats.TotalEntries = totalEntries
-			result.Stats.MatchedEntries = matchedEntries
-			result.Stats.QueryTime = queryTime
-		}
-
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return writeJSONLines(entries, os.Stdout)
 	}
 
 	// Text format
@@ -555,9 +492,7 @@ func showFileInfo(reader *buildkitelogs.ParquetReader, config *QueryConfig) erro
 	}
 
 	if config.Format == "json" {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(info)
+		return writeJSONLines([]*buildkitelogs.ParquetFileInfo{info}, os.Stdout)
 	}
 
 	// Text format
@@ -639,26 +574,7 @@ func seekToRow(reader *buildkitelogs.ParquetReader, config *QueryConfig, start t
 // formatTailResult formats tail command output
 func formatTailResult(entries []buildkitelogs.ParquetLogEntry, totalRows, entriesRead int64, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
-		result := struct {
-			Entries []buildkitelogs.ParquetLogEntry `json:"entries"`
-			Stats   struct {
-				TotalRows    int64   `json:"total_rows"`
-				EntriesShown int64   `json:"entries_shown"`
-				QueryTime    float64 `json:"query_time_ms"`
-			} `json:"stats,omitempty"`
-		}{
-			Entries: entries,
-		}
-
-		if config.ShowStats {
-			result.Stats.TotalRows = totalRows
-			result.Stats.EntriesShown = entriesRead
-			result.Stats.QueryTime = queryTime
-		}
-
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return writeJSONLines(entries, os.Stdout)
 	}
 
 	// Text format
@@ -699,26 +615,7 @@ func formatTailResult(entries []buildkitelogs.ParquetLogEntry, totalRows, entrie
 // formatSeekResult formats seek command output
 func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entriesRead int64, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
-		result := struct {
-			Entries []buildkitelogs.ParquetLogEntry `json:"entries"`
-			Stats   struct {
-				StartRow     int64   `json:"start_row"`
-				EntriesShown int64   `json:"entries_shown"`
-				QueryTime    float64 `json:"query_time_ms"`
-			} `json:"stats,omitempty"`
-		}{
-			Entries: entries,
-		}
-
-		if config.ShowStats {
-			result.Stats.StartRow = startRow
-			result.Stats.EntriesShown = entriesRead
-			result.Stats.QueryTime = queryTime
-		}
-
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return writeJSONLines(entries, os.Stdout)
 	}
 
 	// Text format
@@ -787,26 +684,7 @@ func streamDump(reader *buildkitelogs.ParquetReader, config *QueryConfig, start 
 // formatDumpResult formats dump command output
 func formatDumpResult(entries []buildkitelogs.ParquetLogEntry, totalEntries int, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
-		result := struct {
-			Entries []buildkitelogs.ParquetLogEntry `json:"entries"`
-			Stats   struct {
-				TotalEntries int     `json:"total_entries"`
-				EntriesShown int     `json:"entries_shown"`
-				QueryTime    float64 `json:"query_time_ms"`
-			} `json:"stats,omitempty"`
-		}{
-			Entries: entries,
-		}
-
-		if config.ShowStats {
-			result.Stats.TotalEntries = totalEntries
-			result.Stats.EntriesShown = len(entries)
-			result.Stats.QueryTime = queryTime
-		}
-
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return writeJSONLines(entries, os.Stdout)
 	}
 
 	// Text format

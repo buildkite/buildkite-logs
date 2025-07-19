@@ -23,11 +23,10 @@ This parser extracts the timestamps and content, providing both a Go library API
 - **Content Classification**: Automatically identifies different types of log entries:
   - Commands (lines starting with `$`)
   - Section headers (lines starting with `~~~`, `---`, or `+++`)
-  - Progress updates (git operation progress)
 - **Multiple Data Sources**: Local files and Buildkite API integration
 - **Buildkite API**: Fetch logs directly from Buildkite jobs via REST API
 - **Multiple Output Formats**: Text, JSON, and Parquet export
-- **Filtering**: Filter logs by entry type (command, group, progress)
+- **Filtering**: Filter logs by entry type (command, group)
 - **Stream Processing**: Parse from any `io.Reader`
 - **Group Tracking**: Automatically associate entries with build groups/sections
 - **Parquet Export**: Efficient columnar storage for analytics and data processing
@@ -127,8 +126,7 @@ Total entries: 212
 Entries with timestamps: 212
 Commands: 15
 Sections: 13
-Progress updates: 5
-Regular output: 179
+Regular output: 184
 ```
 
 **Show group/section information:**
@@ -156,8 +154,7 @@ Total entries: 212
 Entries with timestamps: 212
 Commands: 15
 Sections: 13
-Progress updates: 4
-Regular output: 180
+Regular output: 184
 Exported 212 entries to output.parquet
 ```
 
@@ -179,11 +176,11 @@ Output:
 ```
 Groups found: 5
 
-GROUP NAME                                ENTRIES COMMANDS PROGRESS          FIRST SEEN           LAST SEEN
-------------------------------------------------------------------------------------------------------------------------
-~~~ Running global environment hook             2        1        0 2025-04-22 21:43:29 2025-04-22 21:43:29
-~~~ Running global pre-checkout hook            2        1        0 2025-04-22 21:43:29 2025-04-22 21:43:29
---- :package: Build job checkout dire...        2        1        0 2025-04-22 21:43:30 2025-04-22 21:43:30
+GROUP NAME                                ENTRIES COMMANDS          FIRST SEEN           LAST SEEN
+------------------------------------------------------------------------------------------------------------
+~~~ Running global environment hook             2        1 2025-04-22 21:43:29 2025-04-22 21:43:29
+~~~ Running global pre-checkout hook            2        1 2025-04-22 21:43:29 2025-04-22 21:43:29
+--- :package: Build job checkout dire...        2        1 2025-04-22 21:43:30 2025-04-22 21:43:30
 
 --- Query Statistics ---
 Total entries: 10
@@ -469,7 +466,7 @@ Output:
 **Output Options:**
 - `-json`: Output as JSON instead of text
 - `-strip-ansi`: Remove ANSI escape sequences from output
-- `-filter <type>`: Filter entries by type (`command`, `group`, `progress`)
+- `-filter <type>`: Filter entries by type (`command`, `group`)
 - `-summary`: Show processing summary at the end
 - `-groups`: Show group/section information for each entry
 - `-parquet <path>`: Export to Parquet file (e.g., output.parquet)
@@ -525,15 +522,6 @@ Headers that mark different phases of the build (collapsible in Buildkite UI):
 [2025-04-22 21:43:30.699] +++ :hammer: Example tests
 ```
 
-### Progress Updates
-Progress indicators from git operations, identified by `[K` (erase-in-line) sequences:
-```
-[2025-04-22 21:43:30.213] remote: Counting objects:  50% (27/54)[K...
-[2025-04-22 21:43:30.213] remote: Compressing objects: 100% (17/17), done.[K...
-```
-
-Progress lines contain the `[K` ANSI escape sequence, which indicates they were meant to overwrite each other in a terminal. The parser conservatively requires both the `[K` sequence and progress-related content (objects, deltas, or percentages) to avoid false positives.
-
 ### Groups/Sections
 
 The parser automatically tracks which section or group each log entry belongs to:
@@ -574,7 +562,6 @@ The exported Parquet files contain the following columns:
 | `has_timestamp` | bool | Whether entry has a valid timestamp |
 | `is_command` | bool | Whether entry is a shell command |
 | `is_group` | bool | Whether entry is a group header |
-| `is_progress` | bool | Whether entry is a progress update |
 
 ### Usage Examples
 
@@ -650,8 +637,7 @@ func (entry *LogEntry) HasTimestamp() bool
 func (entry *LogEntry) CleanContent() string  // Content with ANSI stripped
 func (entry *LogEntry) IsCommand() bool
 func (entry *LogEntry) IsGroup() bool         // Check if entry is a group header (~~~, ---, +++)
-func (entry *LogEntry) IsSection() bool       // Deprecated: use IsGroup() instead  
-func (entry *LogEntry) IsProgress() bool
+func (entry *LogEntry) IsSection() bool       // Deprecated: use IsGroup() instead
 ```
 
 #### Parquet Export Functions
@@ -702,7 +688,7 @@ type ParquetLogEntry struct {
     HasTime     bool   `json:"has_timestamp"`  // Whether entry has timestamp
     IsCommand   bool   `json:"is_command"`     // Whether entry is a command
     IsGroup     bool   `json:"is_group"`       // Whether entry is a group header
-    IsProgress  bool   `json:"is_progress"`    // Whether entry is progress update
+
 }
 
 type GroupInfo struct {
@@ -711,7 +697,7 @@ type GroupInfo struct {
     FirstSeen  time.Time `json:"first_seen"`    // Timestamp of first entry
     LastSeen   time.Time `json:"last_seen"`     // Timestamp of last entry
     Commands   int       `json:"commands"`      // Number of command entries
-    Progress   int       `json:"progress"`      // Number of progress entries
+
 }
 
 ```
@@ -732,7 +718,7 @@ go test -bench=. -benchmem
 - OSC sequence with timestamp: ~64 ns/op, 192 B/op, 3 allocs/op
 - Regular line (no timestamp): ~29 ns/op, 128 B/op, 2 allocs/op
 - ANSI-heavy line: ~68 ns/op, 224 B/op, 3 allocs/op
-- Progress line: ~65 ns/op, 192 B/op, 3 allocs/op
+
 
 **Memory Usage (10,000 lines):**
 - **Seq2 Streaming Iterator**: ~3.5 MB allocated, 64,006 allocations
@@ -752,7 +738,7 @@ go test -bench=. -benchmem
 **Content Classification Performance (1,000 entries):**
 - **IsCommand()**: ~15,000 ops/sec, 84 KB allocated
 - **IsGroup()**: ~14,000 ops/sec, 84 KB allocated
-- **IsProgress()**: ~64,000 ops/sec, 9.5 KB allocated
+
 - **CleanContent()**: ~15,000 ops/sec, 84 KB allocated
 
 **Parquet Streaming Query Performance (Apache Arrow Go v18):**

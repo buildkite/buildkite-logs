@@ -119,53 +119,34 @@ func TestLogEntryClassification(t *testing.T) {
 	parser := NewParser()
 
 	tests := []struct {
-		name         string
-		input        string
-		wantCommand  bool
-		wantSection  bool
-		wantProgress bool
+		name        string
+		input       string
+		wantCommand bool
+		wantSection bool
 	}{
 		{
-			name:         "Command with ANSI",
-			input:        "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment",
-			wantCommand:  true,
-			wantSection:  false,
-			wantProgress: false,
+			name:        "Command with ANSI",
+			input:       "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment",
+			wantCommand: true,
+			wantSection: false,
 		},
 		{
-			name:         "Section header",
-			input:        "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
-			wantCommand:  false,
-			wantSection:  true,
-			wantProgress: false,
+			name:        "Section header",
+			input:       "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
+			wantCommand: false,
+			wantSection: true,
 		},
 		{
-			name:         "Progress line",
-			input:        "\x1b_bk;t=1745322210213\x07remote: Counting objects:  50% (27/54)[K",
-			wantCommand:  false,
-			wantSection:  false,
-			wantProgress: true,
+			name:        "Build artifact section",
+			input:       "\x1b_bk;t=1745322210701\x07+++ :frame_with_picture: Inline image uploaded",
+			wantCommand: false,
+			wantSection: true,
 		},
 		{
-			name:         "Progress with ANSI and K",
-			input:        "\x1b_bk;t=1745322210213\x07remote: Counting objects:  50% (27/54)[K",
-			wantCommand:  false,
-			wantSection:  false,
-			wantProgress: true,
-		},
-		{
-			name:         "Build artifact section",
-			input:        "\x1b_bk;t=1745322210701\x07+++ :frame_with_picture: Inline image uploaded",
-			wantCommand:  false,
-			wantSection:  true,
-			wantProgress: false,
-		},
-		{
-			name:         "Regular output",
-			input:        "\x1b_bk;t=1745322210701\x07Cloning into '.'...",
-			wantCommand:  false,
-			wantSection:  false,
-			wantProgress: false,
+			name:        "Regular output",
+			input:       "\x1b_bk;t=1745322210701\x07Cloning into '.'...",
+			wantCommand: false,
+			wantSection: false,
 		},
 	}
 
@@ -184,9 +165,6 @@ func TestLogEntryClassification(t *testing.T) {
 				t.Errorf("IsSection() = %v, want %v", entry.IsSection(), tt.wantSection)
 			}
 
-			if entry.IsProgress() != tt.wantProgress {
-				t.Errorf("IsProgress() = %v, want %v", entry.IsProgress(), tt.wantProgress)
-			}
 		})
 	}
 }

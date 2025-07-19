@@ -59,9 +59,6 @@ func main() {
 		if entry.IsCommand {
 			info.Commands++
 		}
-		if entry.IsProgress {
-			info.Progress++
-		}
 	}
 
 	fmt.Printf("Processed %d total entries\n", totalEntries)

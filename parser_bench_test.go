@@ -155,7 +155,6 @@ func BenchmarkIteratorWithFiltering(b *testing.B) {
 	}{
 		{"commands", func(e *LogEntry) bool { return e.IsCommand() }},
 		{"sections", func(e *LogEntry) bool { return e.IsSection() }},
-		{"progress", func(e *LogEntry) bool { return e.IsProgress() }},
 	}
 
 	for _, filter := range filters {
@@ -276,7 +275,6 @@ func BenchmarkSeq2WithFiltering(b *testing.B) {
 	}{
 		{"commands", func(e *LogEntry) bool { return e.IsCommand() }},
 		{"groups", func(e *LogEntry) bool { return e.IsGroup() }},
-		{"progress", func(e *LogEntry) bool { return e.IsProgress() }},
 	}
 
 	for _, filter := range filters {
@@ -401,7 +399,6 @@ func BenchmarkByteParserCore(b *testing.B) {
 		{"osc_with_timestamp", "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook"},
 		{"regular_line", "regular log line without timestamp"},
 		{"ansi_heavy", "\x1b_bk;t=1745322209921\x07\x1b[38;5;48m2025-04-22 11:43:30 INFO\x1b[0m \x1b[0mFound files\x1b[0m"},
-		{"progress_line", "\x1b_bk;t=1745322210213\x07remote: Counting objects:  50% (27/54)[K"},
 	}
 
 	for _, tc := range testCases {
@@ -446,15 +443,6 @@ func BenchmarkContentClassification(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			for _, entry := range entries {
 				_ = entry.IsGroup()
-			}
-		}
-	})
-
-	b.Run("is_progress", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for _, entry := range entries {
-				_ = entry.IsProgress()
 			}
 		}
 	})

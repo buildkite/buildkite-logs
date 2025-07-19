@@ -36,7 +36,6 @@ type ProcessingSummary struct {
 	EntriesWithTime int
 	Commands        int
 	Sections        int
-	Progress        int
 }
 
 func main() {
@@ -82,7 +81,7 @@ func handleParseCommand() {
 	parseFlags.StringVar(&config.FilePath, "file", "", "Path to Buildkite log file (use this OR API parameters)")
 	parseFlags.BoolVar(&config.OutputJSON, "json", false, "Output as JSON")
 	parseFlags.BoolVar(&config.StripANSI, "strip-ansi", false, "Strip ANSI escape sequences from output")
-	parseFlags.StringVar(&config.Filter, "filter", "", "Filter entries by type: command, progress, group")
+	parseFlags.StringVar(&config.Filter, "filter", "", "Filter entries by type: command, group")
 	parseFlags.BoolVar(&config.ShowSummary, "summary", false, "Show processing summary at the end")
 	parseFlags.BoolVar(&config.ShowGroups, "groups", false, "Show group/section information")
 	parseFlags.StringVar(&config.ParquetFile, "parquet", "", "Export to Parquet file (e.g., output.parquet)")
@@ -347,9 +346,6 @@ func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 		if entry.IsGroup() {
 			summary.Sections++
 		}
-		if entry.IsProgress() {
-			summary.Progress++
-		}
 
 		if !shouldIncludeEntry(entry, filter) {
 			continue
@@ -401,9 +397,6 @@ func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 		if entry.IsGroup() {
 			summary.Sections++
 		}
-		if entry.IsProgress() {
-			summary.Progress++
-		}
 
 		if !shouldIncludeEntry(entry, filter) {
 			continue
@@ -440,8 +433,6 @@ func shouldIncludeEntry(entry *buildkitelogs.LogEntry, filter string) bool {
 		return entry.IsCommand()
 	case "group", "section": // Support both for backward compatibility
 		return entry.IsGroup()
-	case "progress":
-		return entry.IsProgress()
 	default:
 		return true
 	}
@@ -483,9 +474,6 @@ func exportToParquetSeq2(reader io.Reader, parser *buildkitelogs.Parser, filenam
 			if entry.IsGroup() {
 				summary.Sections++
 			}
-			if entry.IsProgress() {
-				summary.Progress++
-			}
 
 			// Apply filter if specified
 			if filterFunc == nil || filterFunc(entry) {
@@ -514,8 +502,7 @@ func printSummary(summary *ProcessingSummary) {
 	fmt.Printf("Entries with timestamps: %d\n", summary.EntriesWithTime)
 	fmt.Printf("Commands: %d\n", summary.Commands)
 	fmt.Printf("Sections: %d\n", summary.Sections)
-	fmt.Printf("Progress updates: %d\n", summary.Progress)
-	fmt.Printf("Regular output: %d\n", summary.TotalEntries-summary.Commands-summary.Sections-summary.Progress)
+	fmt.Printf("Regular output: %d\n", summary.TotalEntries-summary.Commands-summary.Sections)
 
 	if summary.FilteredEntries > 0 {
 		fmt.Printf("Exported %d entries to %s\n", summary.FilteredEntries, "Parquet file")

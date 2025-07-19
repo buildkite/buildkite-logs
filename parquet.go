@@ -44,7 +44,6 @@ func createArrowSchema() *arrow.Schema {
 		{Name: "has_timestamp", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
 		{Name: "is_command", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
 		{Name: "is_group", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
-		{Name: "is_progress", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
 	}, nil)
 }
 
@@ -62,7 +61,6 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 	pw.hasTimestampBuilder.Resize(numEntries)
 	pw.isCommandBuilder.Resize(numEntries)
 	pw.isGroupBuilder.Resize(numEntries)
-	pw.isProgressBuilder.Resize(numEntries)
 
 	// Populate arrays
 	for _, entry := range entries {
@@ -76,7 +74,6 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 		pw.hasTimestampBuilder.Append(entry.HasTimestamp())
 		pw.isCommandBuilder.Append(entry.IsCommand())
 		pw.isGroupBuilder.Append(entry.IsGroup())
-		pw.isProgressBuilder.Append(entry.IsProgress())
 	}
 
 	// Build arrays
@@ -86,7 +83,6 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 	hasTimestampArray := pw.hasTimestampBuilder.NewArray()
 	isCommandArray := pw.isCommandBuilder.NewArray()
 	isGroupArray := pw.isGroupBuilder.NewArray()
-	isProgressArray := pw.isProgressBuilder.NewArray()
 
 	defer timestampArray.Release()
 	defer contentArray.Release()
@@ -94,7 +90,6 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 	defer hasTimestampArray.Release()
 	defer isCommandArray.Release()
 	defer isGroupArray.Release()
-	defer isProgressArray.Release()
 
 	// Create record
 	return array.NewRecord(pw.schema, []arrow.Array{
@@ -104,7 +99,6 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 		hasTimestampArray,
 		isCommandArray,
 		isGroupArray,
-		isProgressArray,
 	}, int64(numEntries)), nil
 }
 
@@ -122,7 +116,6 @@ type ParquetWriter struct {
 	hasTimestampBuilder *array.BooleanBuilder
 	isCommandBuilder    *array.BooleanBuilder
 	isGroupBuilder      *array.BooleanBuilder
-	isProgressBuilder   *array.BooleanBuilder
 }
 
 // NewParquetWriter creates a new Parquet writer for streaming
@@ -148,7 +141,6 @@ func NewParquetWriter(file *os.File) *ParquetWriter {
 		hasTimestampBuilder: array.NewBooleanBuilder(pool),
 		isCommandBuilder:    array.NewBooleanBuilder(pool),
 		isGroupBuilder:      array.NewBooleanBuilder(pool),
-		isProgressBuilder:   array.NewBooleanBuilder(pool),
 	}
 }
 
@@ -176,7 +168,6 @@ func (pw *ParquetWriter) Close() error {
 	pw.hasTimestampBuilder.Release()
 	pw.isCommandBuilder.Release()
 	pw.isGroupBuilder.Release()
-	pw.isProgressBuilder.Release()
 
 	return pw.writer.Close()
 }

@@ -2,7 +2,7 @@
 /bklog
 /build/
 /*.parquet
-/*.log
+*.log
 cmd/bklog/bklog
 # Added by goreleaser init:
 dist/

@@ -145,9 +145,6 @@ func streamListGroups(reader *buildkitelogs.ParquetReader, config *QueryConfig, 
 		if entry.IsCommand {
 			info.Commands++
 		}
-		if entry.IsProgress {
-			info.Progress++
-		}
 	}
 
 	// Convert to slice and sort
@@ -301,16 +298,15 @@ func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries 
 	}
 
 	// Print table header
-	fmt.Printf("%-40s %8s %8s %8s %19s %19s\n",
-		"GROUP NAME", "ENTRIES", "COMMANDS", "PROGRESS", "FIRST SEEN", "LAST SEEN")
-	fmt.Println(strings.Repeat("-", 120))
+	fmt.Printf("%-40s %8s %8s %19s %19s\n",
+		"GROUP NAME", "ENTRIES", "COMMANDS", "FIRST SEEN", "LAST SEEN")
+	fmt.Println(strings.Repeat("-", 104))
 
 	for _, group := range groups {
-		fmt.Printf("%-40s %8d %8d %8d %19s %19s\n",
+		fmt.Printf("%-40s %8d %8d %19s %19s\n",
 			truncateString(group.Name, 40),
 			group.EntryCount,
 			group.Commands,
-			group.Progress,
 			group.FirstSeen.Format("2006-01-02 15:04:05"),
 			group.LastSeen.Format("2006-01-02 15:04:05"))
 	}
@@ -527,9 +523,6 @@ func formatStreamingEntriesResult(entries []buildkitelogs.ParquetLogEntry, total
 		if entry.IsGroup {
 			markers = append(markers, "GRP")
 		}
-		if entry.IsProgress {
-			markers = append(markers, "PROG")
-		}
 
 		markerStr := ""
 		if len(markers) > 0 {
@@ -681,9 +674,6 @@ func formatTailResult(entries []buildkitelogs.ParquetLogEntry, totalRows, entrie
 		if entry.IsGroup {
 			markers = append(markers, "GRP")
 		}
-		if entry.IsProgress {
-			markers = append(markers, "PROG")
-		}
 
 		markerStr := ""
 		if len(markers) > 0 {
@@ -747,9 +737,6 @@ func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entries
 		}
 		if entry.IsGroup {
 			markers = append(markers, "GRP")
-		}
-		if entry.IsProgress {
-			markers = append(markers, "PROG")
 		}
 
 		markerStr := ""
@@ -838,9 +825,6 @@ func formatDumpResult(entries []buildkitelogs.ParquetLogEntry, totalEntries int,
 		}
 		if entry.IsGroup {
 			markers = append(markers, "GRP")
-		}
-		if entry.IsProgress {
-			markers = append(markers, "PROG")
 		}
 
 		markerStr := ""

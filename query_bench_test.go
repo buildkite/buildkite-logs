@@ -120,9 +120,6 @@ func BenchmarkStreamingGroupAnalysis(b *testing.B) {
 			if entry.IsCommand {
 				info.Commands++
 			}
-			if entry.IsProgress {
-				info.Progress++
-			}
 		}
 
 		if len(groupMap) == 0 {

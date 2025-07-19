@@ -17,14 +17,73 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 )
 
+type LogFlag int32
+
+const (
+	HasTimestamp LogFlag = iota
+	IsCommand
+	IsGroup
+)
+
+// LogFlags represents a bitwise combination of log flags
+type LogFlags int32
+
+// Has returns true if the specified flag is set
+func (lf LogFlags) Has(flag LogFlag) bool {
+	return lf&(1<<flag) != 0
+}
+
+// Set sets the specified flag
+func (lf *LogFlags) Set(flag LogFlag) {
+	*lf |= (1 << flag)
+}
+
+// Clear clears the specified flag
+func (lf *LogFlags) Clear(flag LogFlag) {
+	*lf &^= (1 << flag)
+}
+
+// Toggle toggles the specified flag
+func (lf *LogFlags) Toggle(flag LogFlag) {
+	*lf ^= (1 << flag)
+}
+
+// HasTimestamp returns true if HasTimestamp flag is set
+func (lf LogFlags) HasTimestamp() bool {
+	return lf.Has(HasTimestamp)
+}
+
+// IsCommand returns true if IsCommand flag is set
+func (lf LogFlags) IsCommand() bool {
+	return lf.Has(IsCommand)
+}
+
+// IsGroup returns true if IsGroup flag is set
+func (lf LogFlags) IsGroup() bool {
+	return lf.Has(IsGroup)
+}
+
 // ParquetLogEntry represents a log entry read from a Parquet file
 type ParquetLogEntry struct {
-	Timestamp int64  `json:"timestamp"`
-	Content   string `json:"content"`
-	Group     string `json:"group"`
-	HasTime   bool   `json:"has_timestamp"`
-	IsCommand bool   `json:"is_command"`
-	IsGroup   bool   `json:"is_group"`
+	Timestamp int64    `json:"timestamp"`
+	Content   string   `json:"content"`
+	Group     string   `json:"group"`
+	Flags     LogFlags `json:"flags"`
+}
+
+// HasTime returns true if the entry has a timestamp (backward compatibility)
+func (entry *ParquetLogEntry) HasTime() bool {
+	return entry.Flags.HasTimestamp()
+}
+
+// IsCommand returns true if the entry is a command (backward compatibility)
+func (entry *ParquetLogEntry) IsCommand() bool {
+	return entry.Flags.IsCommand()
+}
+
+// IsGroup returns true if the entry is a group header (backward compatibility)
+func (entry *ParquetLogEntry) IsGroup() bool {
+	return entry.Flags.IsGroup()
 }
 
 // GroupInfo contains statistical information about a log group
@@ -218,14 +277,13 @@ func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[Pa
 
 // columnMapping holds column indices for efficient access
 type columnMapping struct {
-	timestampIdx, contentIdx, groupIdx, hasTimeIdx, isCmdIdx, isGroupIdx int
+	timestampIdx, contentIdx, groupIdx, flagsIdx int
 }
 
 // mapColumns maps column names to indices from schema
 func mapColumns(schema *arrow.Schema) (*columnMapping, error) {
 	mapping := &columnMapping{
-		timestampIdx: -1, contentIdx: -1, groupIdx: -1, hasTimeIdx: -1,
-		isCmdIdx: -1, isGroupIdx: -1,
+		timestampIdx: -1, contentIdx: -1, groupIdx: -1, flagsIdx: -1,
 	}
 
 	for i, field := range schema.Fields() {
@@ -236,13 +294,8 @@ func mapColumns(schema *arrow.Schema) (*columnMapping, error) {
 			mapping.contentIdx = i
 		case "group":
 			mapping.groupIdx = i
-		case "has_timestamp":
-			mapping.hasTimeIdx = i
-		case "is_command":
-			mapping.isCmdIdx = i
-		case "is_group":
-			mapping.isGroupIdx = i
-
+		case "flags":
+			mapping.flagsIdx = i
 		}
 	}
 
@@ -262,18 +315,12 @@ func convertRecordToEntriesIterStreaming(record arrow.Record, mapping *columnMap
 		timestampCol := record.Column(mapping.timestampIdx)
 		contentCol := record.Column(mapping.contentIdx)
 
-		var groupCol, hasTimeCol, isCmdCol, isGroupCol arrow.Array
+		var groupCol, flagsCol arrow.Array
 		if mapping.groupIdx >= 0 {
 			groupCol = record.Column(mapping.groupIdx)
 		}
-		if mapping.hasTimeIdx >= 0 {
-			hasTimeCol = record.Column(mapping.hasTimeIdx)
-		}
-		if mapping.isCmdIdx >= 0 {
-			isCmdCol = record.Column(mapping.isCmdIdx)
-		}
-		if mapping.isGroupIdx >= 0 {
-			isGroupCol = record.Column(mapping.isGroupIdx)
+		if mapping.flagsIdx >= 0 {
+			flagsCol = record.Column(mapping.flagsIdx)
 		}
 
 		// Convert each row
@@ -318,20 +365,10 @@ func convertRecordToEntriesIterStreaming(record arrow.Record, mapping *columnMap
 				}
 			}
 
-			// Boolean fields (optional)
-			if hasTimeCol != nil && !hasTimeCol.IsNull(i) {
-				if boolCol, ok := hasTimeCol.(*array.Boolean); ok {
-					entry.HasTime = boolCol.Value(i)
-				}
-			}
-			if isCmdCol != nil && !isCmdCol.IsNull(i) {
-				if boolCol, ok := isCmdCol.(*array.Boolean); ok {
-					entry.IsCommand = boolCol.Value(i)
-				}
-			}
-			if isGroupCol != nil && !isGroupCol.IsNull(i) {
-				if boolCol, ok := isGroupCol.(*array.Boolean); ok {
-					entry.IsGroup = boolCol.Value(i)
+			// Flags field (optional)
+			if flagsCol != nil && !flagsCol.IsNull(i) {
+				if intCol, ok := flagsCol.(*array.Int32); ok {
+					entry.Flags = LogFlags(intCol.Value(i))
 				}
 			}
 

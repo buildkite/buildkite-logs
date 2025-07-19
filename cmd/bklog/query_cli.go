@@ -142,7 +142,7 @@ func streamListGroups(reader *buildkitelogs.ParquetReader, config *QueryConfig, 
 			info.LastSeen = entryTime
 		}
 
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			info.Commands++
 		}
 	}
@@ -181,7 +181,7 @@ func streamListCommands(reader *buildkitelogs.ParquetReader, config *QueryConfig
 		totalEntries++
 
 		// Filter for command entries only
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			commandCount++
 			commands = append(commands, entry)
 
@@ -517,10 +517,10 @@ func formatStreamingEntriesResult(entries []buildkitelogs.ParquetLogEntry, total
 		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
 
 		var markers []string
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			markers = append(markers, "CMD")
 		}
-		if entry.IsGroup {
+		if entry.IsGroup() {
 			markers = append(markers, "GRP")
 		}
 
@@ -668,10 +668,10 @@ func formatTailResult(entries []buildkitelogs.ParquetLogEntry, totalRows, entrie
 		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
 
 		var markers []string
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			markers = append(markers, "CMD")
 		}
-		if entry.IsGroup {
+		if entry.IsGroup() {
 			markers = append(markers, "GRP")
 		}
 
@@ -732,10 +732,10 @@ func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entries
 		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
 
 		var markers []string
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			markers = append(markers, "CMD")
 		}
-		if entry.IsGroup {
+		if entry.IsGroup() {
 			markers = append(markers, "GRP")
 		}
 
@@ -820,10 +820,10 @@ func formatDumpResult(entries []buildkitelogs.ParquetLogEntry, totalEntries int,
 		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
 
 		var markers []string
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			markers = append(markers, "CMD")
 		}
-		if entry.IsGroup {
+		if entry.IsGroup() {
 			markers = append(markers, "GRP")
 		}
 

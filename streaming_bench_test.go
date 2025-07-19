@@ -124,7 +124,7 @@ func BenchmarkStreamingFiles(b *testing.B) {
 					}
 
 					info.EntryCount++
-					if entry.IsCommand {
+					if entry.IsCommand() {
 						info.Commands++
 					}
 				}

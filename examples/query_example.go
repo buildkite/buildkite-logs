@@ -56,7 +56,7 @@ func main() {
 			info.LastSeen = entryTime
 		}
 
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			info.Commands++
 		}
 	}

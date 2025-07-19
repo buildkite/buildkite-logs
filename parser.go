@@ -155,3 +155,18 @@ func (entry *LogEntry) IsGroup() bool {
 func (entry *LogEntry) IsSection() bool {
 	return entry.IsGroup()
 }
+
+// ComputeFlags returns the consolidated flags for this log entry
+func (entry *LogEntry) ComputeFlags() LogFlags {
+	var flags LogFlags
+	if entry.HasTimestamp() {
+		flags.Set(HasTimestamp)
+	}
+	if entry.IsCommand() {
+		flags.Set(IsCommand)
+	}
+	if entry.IsGroup() {
+		flags.Set(IsGroup)
+	}
+	return flags
+}

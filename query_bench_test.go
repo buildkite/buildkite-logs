@@ -117,7 +117,7 @@ func BenchmarkStreamingGroupAnalysis(b *testing.B) {
 			}
 
 			info.EntryCount++
-			if entry.IsCommand {
+			if entry.IsCommand() {
 				info.Commands++
 			}
 		}
@@ -349,7 +349,7 @@ func BenchmarkStreamingScalability(b *testing.B) {
 				}
 				// Complex processing: build statistics
 				groupStats[entry.Group]++
-				if entry.IsCommand {
+				if entry.IsCommand() {
 					groupStats[entry.Group+"_commands"]++
 				}
 			}

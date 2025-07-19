@@ -111,7 +111,7 @@ func TestParquetReader(t *testing.T) {
 			}
 
 			info.EntryCount++
-			if entry.IsCommand {
+			if entry.IsCommand() {
 				info.Commands++
 			}
 
@@ -172,19 +172,19 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 			Timestamp: baseTime,
 			Content:   "~~~ Running tests",
 			Group:     "~~~ Running tests",
-			IsGroup:   true,
+			Flags:     LogFlags(1 << IsGroup),
 		},
 		{
 			Timestamp: baseTime + 100,
 			Content:   "$ npm test",
 			Group:     "~~~ Running tests",
-			IsCommand: true,
+			Flags:     LogFlags(1 << IsCommand),
 		},
 		{
 			Timestamp: baseTime + 1000,
 			Content:   "--- Build complete",
 			Group:     "--- Build complete",
-			IsGroup:   true,
+			Flags:     LogFlags(1 << IsGroup),
 		},
 	}
 
@@ -217,7 +217,7 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 			info.LastSeen = entryTime
 		}
 
-		if entry.IsCommand {
+		if entry.IsCommand() {
 			info.Commands++
 		}
 	}

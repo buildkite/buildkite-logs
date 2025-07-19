@@ -41,9 +41,7 @@ func createArrowSchema() *arrow.Schema {
 		{Name: "timestamp", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
 		{Name: "content", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}, Nullable: false},
 		{Name: "group", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}, Nullable: false},
-		{Name: "has_timestamp", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
-		{Name: "is_command", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
-		{Name: "is_group", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
+		{Name: "flags", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
 	}, nil)
 }
 
@@ -58,9 +56,7 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 	pw.timestampBuilder.Resize(numEntries)
 	pw.contentBuilder.Resize(numEntries)
 	pw.groupBuilder.Resize(numEntries)
-	pw.hasTimestampBuilder.Resize(numEntries)
-	pw.isCommandBuilder.Resize(numEntries)
-	pw.isGroupBuilder.Resize(numEntries)
+	pw.flagsBuilder.Resize(numEntries)
 
 	// Populate arrays
 	for _, entry := range entries {
@@ -71,34 +67,26 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 		if err := pw.groupBuilder.Append([]byte(entry.Group)); err != nil {
 			return nil, err
 		}
-		pw.hasTimestampBuilder.Append(entry.HasTimestamp())
-		pw.isCommandBuilder.Append(entry.IsCommand())
-		pw.isGroupBuilder.Append(entry.IsGroup())
+		pw.flagsBuilder.Append(int32(entry.ComputeFlags()))
 	}
 
 	// Build arrays
 	timestampArray := pw.timestampBuilder.NewArray()
 	contentArray := pw.contentBuilder.NewArray()
 	groupArray := pw.groupBuilder.NewArray()
-	hasTimestampArray := pw.hasTimestampBuilder.NewArray()
-	isCommandArray := pw.isCommandBuilder.NewArray()
-	isGroupArray := pw.isGroupBuilder.NewArray()
+	flagsArray := pw.flagsBuilder.NewArray()
 
 	defer timestampArray.Release()
 	defer contentArray.Release()
 	defer groupArray.Release()
-	defer hasTimestampArray.Release()
-	defer isCommandArray.Release()
-	defer isGroupArray.Release()
+	defer flagsArray.Release()
 
 	// Create record
 	return array.NewRecord(pw.schema, []arrow.Array{
 		timestampArray,
 		contentArray,
 		groupArray,
-		hasTimestampArray,
-		isCommandArray,
-		isGroupArray,
+		flagsArray,
 	}, int64(numEntries)), nil
 }
 
@@ -110,12 +98,10 @@ type ParquetWriter struct {
 	schema *arrow.Schema
 
 	// Persistent builders for dictionary encoding across batches
-	timestampBuilder    *array.Int64Builder
-	contentBuilder      *array.BinaryDictionaryBuilder
-	groupBuilder        *array.BinaryDictionaryBuilder
-	hasTimestampBuilder *array.BooleanBuilder
-	isCommandBuilder    *array.BooleanBuilder
-	isGroupBuilder      *array.BooleanBuilder
+	timestampBuilder *array.Int64Builder
+	contentBuilder   *array.BinaryDictionaryBuilder
+	groupBuilder     *array.BinaryDictionaryBuilder
+	flagsBuilder     *array.Int32Builder
 }
 
 // NewParquetWriter creates a new Parquet writer for streaming
@@ -135,12 +121,10 @@ func NewParquetWriter(file *os.File) *ParquetWriter {
 		schema: schema,
 
 		// Initialize builders once for dictionary encoding across batches
-		timestampBuilder:    array.NewInt64Builder(pool),
-		contentBuilder:      array.NewDictionaryBuilder(pool, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}).(*array.BinaryDictionaryBuilder),
-		groupBuilder:        array.NewDictionaryBuilder(pool, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}).(*array.BinaryDictionaryBuilder),
-		hasTimestampBuilder: array.NewBooleanBuilder(pool),
-		isCommandBuilder:    array.NewBooleanBuilder(pool),
-		isGroupBuilder:      array.NewBooleanBuilder(pool),
+		timestampBuilder: array.NewInt64Builder(pool),
+		contentBuilder:   array.NewDictionaryBuilder(pool, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}).(*array.BinaryDictionaryBuilder),
+		groupBuilder:     array.NewDictionaryBuilder(pool, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}).(*array.BinaryDictionaryBuilder),
+		flagsBuilder:     array.NewInt32Builder(pool),
 	}
 }
 
@@ -165,9 +149,7 @@ func (pw *ParquetWriter) Close() error {
 	pw.timestampBuilder.Release()
 	pw.contentBuilder.Release()
 	pw.groupBuilder.Release()
-	pw.hasTimestampBuilder.Release()
-	pw.isCommandBuilder.Release()
-	pw.isGroupBuilder.Release()
+	pw.flagsBuilder.Release()
 
 	return pw.writer.Close()
 }

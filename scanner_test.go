@@ -89,51 +89,6 @@ func TestByteParserBasic(t *testing.T) {
 	}
 }
 
-func TestByteParserStripANSI(t *testing.T) {
-	parser := NewByteParser()
-
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "ANSI color codes",
-			input: "[90m$[0m /buildkite/agent/hooks/environment",
-			want:  "$ /buildkite/agent/hooks/environment",
-		},
-		{
-			name:  "No ANSI codes",
-			input: "plain text",
-			want:  "plain text",
-		},
-		{
-			name:  "Complex ANSI sequence",
-			input: "\x1b[38;5;48m2025-04-22 11:43:30 INFO\x1b[0m \x1b[0mFound 2 files\x1b[0m",
-			want:  "2025-04-22 11:43:30 INFO Found 2 files",
-		},
-		{
-			name:  "ANSI with K sequence",
-			input: "remote: Counting objects: 100% (54/54)[K",
-			want:  "remote: Counting objects: 100% (54/54)",
-		},
-		{
-			name:  "Multiple ANSI sequences",
-			input: "\x1b[31mError:\x1b[0m \x1b[1mBold text\x1b[0m",
-			want:  "Error: Bold text",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parser.StripANSI(tt.input)
-			if got != tt.want {
-				t.Errorf("StripANSI() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestByteParserEdgeCases(t *testing.T) {
 	parser := NewByteParser()
 

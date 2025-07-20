@@ -17,7 +17,6 @@ var version = "dev"
 type Config struct {
 	FilePath    string
 	OutputJSON  bool
-	StripANSI   bool
 	Filter      string
 	ShowSummary bool
 	ShowGroups  bool
@@ -80,7 +79,6 @@ func handleParseCommand() {
 	parseFlags := flag.NewFlagSet("parse", flag.ExitOnError)
 	parseFlags.StringVar(&config.FilePath, "file", "", "Path to Buildkite log file (use this OR API parameters)")
 	parseFlags.BoolVar(&config.OutputJSON, "json", false, "Output as JSON")
-	parseFlags.BoolVar(&config.StripANSI, "strip-ansi", false, "Strip ANSI escape sequences from output")
 	parseFlags.StringVar(&config.Filter, "filter", "", "Filter entries by type: command, group")
 	parseFlags.BoolVar(&config.ShowSummary, "summary", false, "Show processing summary at the end")
 	parseFlags.BoolVar(&config.ShowGroups, "groups", false, "Show group/section information")
@@ -298,7 +296,7 @@ func runParse(config *Config) error {
 		}
 	} else {
 		// Regular output processing
-		err := outputSeq2(reader, parser, config.OutputJSON, config.Filter, config.StripANSI, config.ShowGroups, summary)
+		err := outputSeq2(reader, parser, config.OutputJSON, config.Filter, config.ShowGroups, summary)
 		if err != nil {
 			return fmt.Errorf("failed to process data: %w", err)
 		}
@@ -311,15 +309,15 @@ func runParse(config *Config) error {
 	return nil
 }
 
-func outputSeq2(reader io.Reader, parser *buildkitelogs.Parser, outputJSON bool, filter string, stripANSI bool, showGroups bool, summary *ProcessingSummary) error {
+func outputSeq2(reader io.Reader, parser *buildkitelogs.Parser, outputJSON bool, filter string, showGroups bool, summary *ProcessingSummary) error {
 
 	if outputJSON {
-		return outputJSONSeq2(reader, parser, filter, stripANSI, showGroups, summary)
+		return outputJSONSeq2(reader, parser, filter, showGroups, summary)
 	}
-	return outputTextSeq2(reader, parser, filter, stripANSI, showGroups, summary)
+	return outputTextSeq2(reader, parser, filter, showGroups, summary)
 }
 
-func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter string, stripANSI bool, showGroups bool, summary *ProcessingSummary) error {
+func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter string, showGroups bool, summary *ProcessingSummary) error {
 	type JSONEntry struct {
 		Timestamp string `json:"timestamp,omitempty"`
 		Content   string `json:"content"`
@@ -354,9 +352,6 @@ func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 		summary.FilteredEntries++
 
 		content := entry.Content
-		if stripANSI {
-			content = entry.CleanContent()
-		}
 
 		jsonEntry := JSONEntry{
 			Content: content,
@@ -379,7 +374,7 @@ func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 	return encoder.Encode(jsonEntries)
 }
 
-func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter string, stripANSI bool, showGroups bool, summary *ProcessingSummary) error {
+func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter string, showGroups bool, summary *ProcessingSummary) error {
 	for entry, err := range parser.All(reader) {
 		if err != nil {
 			return fmt.Errorf("parse error: %w", err)
@@ -405,9 +400,6 @@ func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 		summary.FilteredEntries++
 
 		content := entry.Content
-		if stripANSI {
-			content = entry.CleanContent()
-		}
 
 		if showGroups && entry.Group != "" {
 			if entry.HasTimestamp() {

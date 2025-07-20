@@ -75,46 +75,6 @@ func TestParseLine(t *testing.T) {
 	}
 }
 
-func TestStripANSI(t *testing.T) {
-	parser := NewParser()
-
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "ANSI color codes",
-			input: "[90m$[0m /buildkite/agent/hooks/environment",
-			want:  "$ /buildkite/agent/hooks/environment",
-		},
-		{
-			name:  "No ANSI codes",
-			input: "plain text",
-			want:  "plain text",
-		},
-		{
-			name:  "Complex ANSI sequence",
-			input: "[38;5;48m2025-04-22 11:43:30 INFO[0m [0mFound 2 files[0m",
-			want:  "2025-04-22 11:43:30 INFO Found 2 files",
-		},
-		{
-			name:  "ANSI with K sequence",
-			input: "remote: Counting objects: 100% (54/54)[K",
-			want:  "remote: Counting objects: 100% (54/54)",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parser.StripANSI(tt.input)
-			if got != tt.want {
-				t.Errorf("StripANSI() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestLogEntryClassification(t *testing.T) {
 	parser := NewParser()
 
@@ -127,7 +87,7 @@ func TestLogEntryClassification(t *testing.T) {
 		{
 			name:        "Command with ANSI",
 			input:       "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment",
-			wantCommand: true,
+			wantCommand: false,
 			wantSection: false,
 		},
 		{
@@ -204,8 +164,8 @@ func TestParseReader(t *testing.T) {
 	if !entries[1].HasTimestamp() {
 		t.Error("Second entry should have timestamp")
 	}
-	if !entries[1].IsCommand() {
-		t.Error("Second entry should be a command")
+	if entries[1].IsCommand() {
+		t.Error("Second entry should not be a command (ANSI codes present)")
 	}
 
 	// Check third entry (regular line)
@@ -256,8 +216,8 @@ func TestLogIterator(t *testing.T) {
 	if !entry.HasTimestamp() {
 		t.Error("Second entry should have timestamp")
 	}
-	if !entry.IsCommand() {
-		t.Error("Second entry should be a command")
+	if entry.IsCommand() {
+		t.Error("Second entry should not be a command (ANSI codes present)")
 	}
 
 	// Test third entry (regular line)

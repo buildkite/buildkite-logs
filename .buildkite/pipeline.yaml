@@ -5,11 +5,21 @@ steps:
       - key: lint
         label: ':golangci-lint: lint'
         plugins:
-          - docker-compose#v5.8.0:
+          - docker-compose#v5.10.0:
               run: golangci-lint
+              progress: plain
+              tty: true
       - key: test
         label: ':go: test'
-        command: go test -v ./...
+        artifact_paths:
+          - cover-tree.svg
+        commands:
+          - go test -coverprofile cover.out ./...
+          - go run github.com/nikolaydubina/go-cover-treemap -coverprofile cover.out > cover-tree.svg
+          - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"        
         plugins:
-          - docker-compose#v5.8.0:
+          - docker-compose#v5.10.0:
               run: golang
+              progress: plain
+              tty: true
+              mount-buildkite-agent: true

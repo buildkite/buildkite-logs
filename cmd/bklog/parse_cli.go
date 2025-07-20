@@ -20,6 +20,7 @@ func handleParseCommand() {
 	parseFlags.BoolVar(&config.ShowSummary, "summary", false, "Show processing summary at the end")
 	parseFlags.BoolVar(&config.ShowGroups, "groups", false, "Show group/section information")
 	parseFlags.StringVar(&config.ParquetFile, "parquet", "", "Export to Parquet file (e.g., output.parquet)")
+	parseFlags.StringVar(&config.JSONLFile, "jsonl", "", "Export to JSON Lines file (e.g., output.jsonl)")
 	// Buildkite API parameters
 	parseFlags.StringVar(&config.Organization, "org", "", "Buildkite organization slug (for API)")
 	parseFlags.StringVar(&config.Pipeline, "pipeline", "", "Buildkite pipeline slug (for API)")
@@ -40,9 +41,11 @@ func handleParseCommand() {
 		fmt.Printf("  %s parse -file buildkite.log -strip-ansi\n", os.Args[0])
 		fmt.Printf("  %s parse -file buildkite.log -filter command -json\n", os.Args[0])
 		fmt.Printf("  %s parse -file buildkite.log -parquet output.parquet -summary\n", os.Args[0])
+		fmt.Printf("  %s parse -file buildkite.log -jsonl output.jsonl -summary\n", os.Args[0])
 		fmt.Printf("\n  # API:\n")
 		fmt.Printf("  %s parse -org myorg -pipeline mypipe -build 123 -job abc-def -json\n", os.Args[0])
 		fmt.Printf("  %s parse -org myorg -pipeline mypipe -build 123 -job abc-def -parquet logs.parquet\n", os.Args[0])
+		fmt.Printf("  %s parse -org myorg -pipeline mypipe -build 123 -job abc-def -jsonl logs.jsonl\n", os.Args[0])
 	}
 
 	if err := parseFlags.Parse(os.Args[2:]); err != nil {
@@ -128,13 +131,19 @@ func runParse(config *Config) error {
 
 	parser := buildkitelogs.NewParser()
 
-	// Handle Parquet export if specified
-	if config.ParquetFile != "" {
+	// Handle export options
+	switch {
+	case config.ParquetFile != "":
 		err := exportToParquetSeq2(reader, parser, config.ParquetFile, config.Filter, summary)
 		if err != nil {
 			return fmt.Errorf("failed to export to Parquet: %w", err)
 		}
-	} else {
+	case config.JSONLFile != "":
+		err := exportToJSONLSeq2(reader, parser, config.JSONLFile, config.Filter, summary)
+		if err != nil {
+			return fmt.Errorf("failed to export to JSON Lines: %w", err)
+		}
+	default:
 		// Regular output processing
 		err := outputSeq2(reader, parser, config.OutputJSON, config.Filter, config.ShowGroups, summary)
 		if err != nil {
@@ -321,6 +330,69 @@ func exportToParquetSeq2(reader io.Reader, parser *buildkitelogs.Parser, filenam
 
 	// Export using the Seq2 iterator with filtering
 	return buildkitelogs.ExportSeq2ToParquetWithFilter(countingSeq, filename, filterFunc)
+}
+
+func exportToJSONLSeq2(reader io.Reader, parser *buildkitelogs.Parser, filename string, filter string, summary *ProcessingSummary) error {
+	// Create filter function based on filter string
+	var filterFunc func(*buildkitelogs.LogEntry) bool
+	if filter != "" {
+		filterFunc = func(entry *buildkitelogs.LogEntry) bool {
+			return shouldIncludeEntry(entry, filter)
+		}
+	}
+
+	// Create output file
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create JSON Lines file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	encoder := json.NewEncoder(file)
+
+	// Create a sequence that counts entries for summary and handles errors
+	lineNum := 0
+	for entry, err := range parser.All(reader) {
+		lineNum++
+
+		// Handle parse errors - still count them but log warnings
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Error parsing line %d: %v\n", lineNum, err)
+			continue
+		}
+
+		summary.TotalEntries++
+
+		// Update entry type counts
+		if entry.HasTimestamp() {
+			summary.EntriesWithTime++
+		}
+		if entry.IsCommand() {
+			summary.Commands++
+		}
+		if entry.IsGroup() {
+			summary.Sections++
+		}
+
+		// Apply filter if specified
+		if filterFunc == nil || filterFunc(entry) {
+			summary.FilteredEntries++
+
+			// Create JSON Lines record
+			record := map[string]any{
+				"timestamp": entry.Timestamp.UnixMilli(),
+				"content":   entry.Content,
+				"group":     entry.Group,
+				"flags":     int32(entry.ComputeFlags()),
+			}
+
+			if err := encoder.Encode(record); err != nil {
+				return fmt.Errorf("failed to write JSON Lines record: %w", err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func printSummary(summary *ProcessingSummary) {

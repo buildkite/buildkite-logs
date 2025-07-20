@@ -60,7 +60,18 @@ func (p *ByteParser) ParseLine(line string) (*LogEntry, error) {
 	timestamp := time.Unix(0, timestampMs*int64(time.Millisecond))
 
 	// Extract content (after BEL)
-	content := string(data[timestampEnd+1:])
+	contentStart := timestampEnd + 1
+	contentData := data[contentStart:]
+
+	// For single OSC sequence model: truncate content at first subsequent OSC sequence
+	// Look for next \x1b_bk;t= pattern in the content
+	contentEnd := findNextOSCStart(contentData)
+	if contentEnd != -1 {
+		// Truncate at the next OSC sequence to keep only the first content piece
+		contentData = contentData[:contentEnd]
+	}
+
+	content := string(contentData)
 
 	return &LogEntry{
 		Timestamp: timestamp,
@@ -84,6 +95,19 @@ func hasOSCStart(data []byte) bool {
 func findBEL(data []byte, start int) int {
 	for i := start; i < len(data); i++ {
 		if data[i] == 0x07 {
+			return i
+		}
+	}
+	return -1
+}
+
+// findNextOSCStart finds the next OSC sequence (\x1b_bk;t=) in the data
+// Returns -1 if no subsequent OSC sequence is found
+func findNextOSCStart(data []byte) int {
+	oscPattern := []byte{0x1b, '_', 'b', 'k', ';', 't', '='}
+
+	for i := 0; i <= len(data)-len(oscPattern); i++ {
+		if bytes.Equal(data[i:i+len(oscPattern)], oscPattern) {
 			return i
 		}
 	}

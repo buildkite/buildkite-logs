@@ -37,6 +37,12 @@ func NewParser() *Parser {
 	}
 }
 
+// Reset clears the parser's internal state, useful for reusing the parser
+// for multiple independent parsing operations
+func (p *Parser) Reset() {
+	p.currentGroup = ""
+}
+
 // ParseLine parses a single log line
 func (p *Parser) ParseLine(line string) (*LogEntry, error) {
 	entry, err := p.byteParser.ParseLine(line)
@@ -65,21 +71,34 @@ func (p *Parser) NewIterator(reader io.Reader) *LogIterator {
 
 // All returns an iterator over all log entries using Go 1.23+ iter.Seq2 pattern
 // Each iteration yields a *LogEntry and an error, following Go's idiomatic error handling
+// This method creates isolated parser state to prevent contamination between iterations
 func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error] {
 	return func(yield func(*LogEntry, error) bool) {
 		scanner := bufio.NewScanner(reader)
+		// Create isolated parser state for this iteration to prevent state contamination
+		localCurrentGroup := ""
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			entry, err := p.ParseLine(line)
+			// Parse line using byte parser directly to avoid state contamination
+			entry, err := p.byteParser.ParseLine(line)
+			if err != nil {
+				if !yield(entry, err) {
+					return
+				}
+				continue
+			}
 
-			// Yield both the entry (which may be nil if err != nil) and the error
+			// Handle group tracking with local state
+			if entry.IsGroup() {
+				localCurrentGroup = entry.Content
+			}
+			entry.Group = localCurrentGroup
+
+			// Yield the processed entry
 			if !yield(entry, err) {
 				return
 			}
-
-			// If there was a parse error, we've yielded it to the caller
-			// They can decide whether to continue or stop
 		}
 
 		// Check for scanner errors and yield final error if any

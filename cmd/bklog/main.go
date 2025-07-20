@@ -16,6 +16,7 @@ type Config struct {
 	ShowSummary bool
 	ShowGroups  bool
 	ParquetFile string
+	JSONLFile   string
 	// Buildkite API parameters
 	Organization string
 	Pipeline     string

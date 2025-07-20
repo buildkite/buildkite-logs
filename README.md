@@ -31,6 +31,7 @@ This parser extracts the timestamps and content, providing both a Go library API
 - **Group Tracking**: Automatically associate entries with build groups/sections
 - **Parquet Export**: Efficient columnar storage for analytics and data processing
 - **Parquet Query**: Fast querying of exported Parquet files with Apache Arrow Go v18
+- **Parser Debugging**: Debug command for troubleshooting OSC sequence parsing issues
 
 ## CLI Usage
 
@@ -397,6 +398,123 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 
 Logs are automatically downloaded and cached in `~/.bklog/` as `{org}-{pipeline}-{build}-{job}.parquet` files. Subsequent queries use the cached version unless the cache is manually cleared.
 
+### Debugging Parser Issues
+
+The CLI includes a debug command for troubleshooting parser corruption issues, especially useful when investigating problems with OSC sequence parsing:
+
+**Debug parser behavior on specific lines:**
+```bash
+./build/bklog debug -file buildkite.log -start 17 -limit 5 -verbose
+```
+Output:
+```
+=== Debug Mode: parse ===
+File: buildkite.log
+Lines: 17-21
+
+--- Line 17 ---
+Timestamp: 2025-07-01 09:20:41.629 +1000 AEST (Unix: 1751321141)
+Content: "remote: Counting objects:   0% (1/287)K_bk;t=1751321141629remote: Counting objects:   1% (3/287)K..."
+Group: ""
+RawLine length: 6619
+IsCommand: false
+IsGroup: false
+```
+
+**Show hex dump of corrupted lines:**
+```bash
+./build/bklog debug -file buildkite.log -mode hex -start 17 -limit 1
+```
+Output:
+```
+=== Debug Mode: hex ===
+File: buildkite.log
+Lines: 17-17
+
+--- Line 17 ---
+Length: 6619 bytes
+00000000  1b 5f 62 6b 3b 74 3d 31  37 35 31 33 32 31 31 34  |._bk;t=175132114|
+00000010  31 36 32 39 07 72 65 6d  6f 74 65 3a 20 43 6f 75  |1629.remote: Cou|
+00000020  6e 74 69 6e 67 20 6f 62  6a 65 63 74 73 3a 20 20  |nting objects:  |
+00000030  20 30 25 20 28 31 2f 32  38 37 29 1b 5b 4b 1b 5f  | 0% (1/287).[K._|
+00000040  62 6b 3b 74 3d 31 37 35  31 33 32 31 31 34 31 36  |bk;t=17513211416|
+```
+
+**Show raw line content with line numbers:**
+```bash
+./build/bklog debug -file buildkite.log -mode lines -start 100 -limit 3
+```
+Output:
+```
+=== Debug Mode: lines ===
+File: buildkite.log
+Lines: 100-102
+
+--- Line 100 ---
+Raw: "\x1b_bk;t=1751321141985\aremote: Total 2113 (delta 1830), reused 2113 (delta 1830), pack-reused 0\r"
+Length: 98
+
+--- Line 101 ---
+Raw: "\x1b_bk;t=1751321142039\aReceiving objects: 100% (2113/2113), 630.45 KiB | 630.00 KiB/s, done.\r"
+Length: 102
+```
+
+**Debug with combined options:**
+```bash
+./build/bklog debug -file buildkite.log -start 50 -end 55 -verbose -raw -hex
+```
+
+This will show verbose parse information, raw line content, and hex dump for lines 50-55.
+
+#### Debug Command Options
+```bash
+./build/bklog debug [options]
+```
+
+**Required:**
+- `-file <path>`: Path to log file to debug (required)
+
+**Range Options:**
+- `-start <line>`: Start line number (1-based, default: 1)
+- `-end <line>`: End line number (0 = start+limit or EOF, default: 0)
+- `-limit <num>`: Number of lines to process (default: 10)
+
+**Mode Options:**
+- `-mode <mode>`: Debug mode: `parse`, `hex`, `lines` (default: `parse`)
+
+**Display Options:**
+- `-verbose`: Show detailed parsing information (default: false)
+- `-raw`: Show raw line content (default: false)
+- `-hex`: Show hex dump of each line (default: false)
+- `-parsed`: Show parsed log entry (default: true)
+
+#### Use Cases
+
+**Investigating Parser Corruption:**
+The debug command is particularly useful for investigating issues where the parser only handles the first OSC sequence per line but ignores subsequent ones, causing content corruption.
+
+**Common Issues Debugged:**
+- Multiple OSC sequences per line (e.g., progress updates)
+- Malformed OSC sequences missing proper terminators
+- ANSI escape sequences interfering with parsing
+- Timestamp extraction failures
+- Content/group association problems
+
+**Example Workflow:**
+```bash
+# 1. Identify problematic lines in output
+./build/bklog parse -file buildkite.log | grep -n "unexpected content"
+
+# 2. Debug specific lines with verbose output
+./build/bklog debug -file buildkite.log -start 142 -limit 1 -verbose
+
+# 3. Examine raw bytes if needed
+./build/bklog debug -file buildkite.log -start 142 -limit 1 -mode hex
+
+# 4. Compare multiple lines to understand patterns
+./build/bklog debug -file buildkite.log -start 140 -end 145 -raw
+```
+
 #### Real Examples Using Test Data
 
 The repository includes test data files that you can use to try out the tail functionality:
@@ -501,6 +619,28 @@ Output:
 - `-C <num>`: Show NUM lines before and after each match (ripgrep-style)
 - `-case-sensitive`: Enable case-sensitive search (default: case-insensitive)
 - `-invert-match`: Show non-matching lines instead of matching ones
+
+#### Debug Command
+```bash
+./build/bklog debug [options]
+```
+
+**Required:**
+- `-file <path>`: Path to log file to debug (required)
+
+**Range Options:**
+- `-start <line>`: Start line number (1-based, default: 1)
+- `-end <line>`: End line number (0 = start+limit or EOF, default: 0)  
+- `-limit <num>`: Number of lines to process (default: 10)
+
+**Mode Options:**
+- `-mode <mode>`: Debug mode: `parse`, `hex`, `lines` (default: `parse`)
+
+**Display Options:**
+- `-verbose`: Show detailed parsing information (default: false)
+- `-raw`: Show raw line content (default: false)
+- `-hex`: Show hex dump of each line (default: false)
+- `-parsed`: Show parsed log entry (default: true)
 
 **Note:** For API usage, set `BUILDKITE_API_TOKEN` environment variable. Logs are automatically downloaded and cached in `~/.bklog/`.
 

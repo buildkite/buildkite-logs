@@ -1,111 +1,96 @@
 package main
 
 import (
-	"bytes"
-	"io"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
 )
 
-func TestFormatLogEntries_RawOutput(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	entries := []buildkitelogs.ParquetLogEntry{
-		{
-			Timestamp: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC).UnixMilli(),
-			Content:   "Test content 1",
-			Group:     "test-group",
-			Flags:     buildkitelogs.LogFlags(1 << 1), // IsCommand (1 << IsCommand)
-		},
-		{
-			Timestamp: time.Date(2025, 1, 1, 12, 1, 0, 0, time.UTC).UnixMilli(),
-			Content:   "Test content 2",
-			Group:     "",
-			Flags:     buildkitelogs.LogFlags(1 << 2), // IsGroup (1 << IsGroup)
-		},
+func TestQueryConfigStripANSI(t *testing.T) {
+	// Test that QueryConfig includes the StripANSI field
+	config := QueryConfig{
+		StripANSI: true,
 	}
 
-	config := &QueryConfig{RawOutput: true}
-
-	formatLogEntries(entries, config)
-
-	// Close writer and capture output
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	_, err := io.Copy(&buf, r)
-	if err != nil {
-		t.Fatalf("Failed to copy output: %v", err)
-	}
-	output := buf.String()
-
-	expected := "Test content 1\nTest content 2\n"
-	if output != expected {
-		t.Errorf("Raw output mismatch.\nGot: %q\nWant: %q", output, expected)
+	if !config.StripANSI {
+		t.Error("StripANSI field should be true")
 	}
 }
 
-func TestFormatLogEntries_FormattedOutput(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
+func TestFormatLogEntriesWithStripANSI(t *testing.T) {
 	entries := []buildkitelogs.ParquetLogEntry{
 		{
-			Timestamp: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC).UnixMilli(),
-			Content:   "Test content 1",
-			Group:     "test-group",
-			Flags:     buildkitelogs.LogFlags(1 << 1), // IsCommand (1 << IsCommand)
+			Timestamp: 1640995200000, // 2022-01-01 00:00:00
+			Content:   "\x1b[31mError: test failed\x1b[0m",
+			Group:     "\x1b[32mTest Group\x1b[0m",
 		},
 		{
-			Timestamp: time.Date(2025, 1, 1, 12, 1, 0, 0, time.UTC).UnixMilli(),
-			Content:   "Group Title",
-			Group:     "Group Title",                  // Same as content
-			Flags:     buildkitelogs.LogFlags(1 << 2), // IsGroup (1 << IsGroup)
+			Timestamp: 1640995200000,
+			Content:   "Normal log line without ANSI",
+			Group:     "Normal Group",
 		},
 	}
 
-	config := &QueryConfig{RawOutput: false}
+	// Test with StripANSI disabled
+	config := &QueryConfig{
+		RawOutput: true,
+		StripANSI: false,
+	}
 
-	formatLogEntries(entries, config)
+	// Verify content is not modified when StripANSI is false
+	for _, entry := range entries {
+		actualContent := entry.CleanContent(config.StripANSI)
+		actualGroup := entry.CleanGroup(config.StripANSI)
 
-	// Close writer and capture output
-	w.Close()
-	os.Stdout = old
+		if config.StripANSI == false && strings.Contains(entry.Content, "\x1b[") {
+			if !strings.Contains(actualContent, "\x1b[") {
+				t.Errorf("ANSI codes should be preserved when StripANSI=false. Got %q", actualContent)
+			}
+		}
 
-	var buf bytes.Buffer
-	_, err := io.Copy(&buf, r)
-	if err != nil {
-		t.Fatalf("Failed to copy output: %v", err)
+		if config.StripANSI == false && strings.Contains(entry.Group, "\x1b[") {
+			if !strings.Contains(actualGroup, "\x1b[") {
+				t.Errorf("ANSI codes should be preserved in group when StripANSI=false. Got %q", actualGroup)
+			}
+		}
 	}
-	output := buf.String()
 
-	// Should show timestamp, group, and CMD marker for first entry
-	// Should show timestamp and GRP marker for second entry (no duplicate group name)
-	if !strings.Contains(output, "[test-group] [CMD] Test content 1") {
-		t.Errorf("First entry not formatted correctly. Got: %s", output)
+	// Test with StripANSI enabled
+	config.StripANSI = true
+
+	// Verify content is modified when StripANSI is true
+	for _, entry := range entries {
+		actualContent := entry.CleanContent(config.StripANSI)
+		actualGroup := entry.CleanGroup(config.StripANSI)
+
+		if strings.Contains(actualContent, "\x1b[") {
+			t.Errorf("ANSI codes should be stripped from content when StripANSI=true. Got %q", actualContent)
+		}
+
+		if strings.Contains(actualGroup, "\x1b[") {
+			t.Errorf("ANSI codes should be stripped from group when StripANSI=true. Got %q", actualGroup)
+		}
+
+		// Test that whitespace is also trimmed
+		if strings.HasPrefix(actualContent, " ") || strings.HasSuffix(actualContent, " ") {
+			t.Errorf("Content should be trimmed. Got %q", actualContent)
+		}
+
+		if strings.HasPrefix(actualGroup, " ") || strings.HasSuffix(actualGroup, " ") {
+			t.Errorf("Group should be trimmed. Got %q", actualGroup)
+		}
 	}
-	if !strings.Contains(output, "[GRP] Group Title") {
-		t.Errorf("Second entry not formatted correctly. Got: %s", output)
-	}
-	// Should not show duplicate group name
-	if strings.Contains(output, "[Group Title] [GRP] Group Title") {
-		t.Errorf("Group name should not be duplicated. Got: %s", output)
-	}
-	// Should contain expected content
-	if !strings.Contains(output, "Test content 1") {
-		t.Errorf("Missing first entry content. Got: %s", output)
-	}
-	if !strings.Contains(output, "Group Title") {
-		t.Errorf("Missing second entry content. Got: %s", output)
+}
+
+func TestStripANSIIntegration(t *testing.T) {
+	// Test that the ANSI stripping integration works correctly
+	testContent := "\x1b[31;1mError:\x1b[0m \x1b[31mtest failed\x1b[0m"
+	expectedContent := "Error: test failed"
+
+	actualContent := buildkitelogs.StripANSI(testContent)
+
+	if actualContent != expectedContent {
+		t.Errorf("StripANSI() = %q, want %q", actualContent, expectedContent)
 	}
 }

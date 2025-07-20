@@ -39,6 +39,12 @@ lint:
 	@echo "Running golangci-lint..."
 	golangci-lint run
 
+# Run linting with auto-fix
+.PHONY: lint-fix
+lint-fix:
+	@echo "Running golangci-lint with auto-fix..."
+	golangci-lint run --fix ./...
+
 # Build the binary
 .PHONY: build
 build:
@@ -105,6 +111,7 @@ help:
 	@echo "  clean      - Clean build artifacts"
 	@echo "  test       - Run tests"
 	@echo "  lint       - Run golangci-lint"
+	@echo "  lint-fix   - Run golangci-lint with auto-fix"
 	@echo "  build      - Build the binary with version $(VERSION)"
 	@echo "  dev        - Quick development build"
 	@echo "  deps       - Install and tidy dependencies"

@@ -155,6 +155,7 @@ func handleQueryCommand() {
 	queryFlags.IntVar(&config.LimitEntries, "limit", 0, "Limit number of entries returned (0 = no limit, enables early termination)")
 	queryFlags.IntVar(&config.TailLines, "tail", 10, "Number of lines to show from end (for tail operation)")
 	queryFlags.Int64Var(&config.SeekToRow, "seek", 0, "Row number to seek to (0-based, for seek operation)")
+	queryFlags.BoolVar(&config.RawOutput, "raw", false, "Output raw log content without timestamps, groups, or other prefixes")
 	// Search operation parameters
 	queryFlags.StringVar(&config.SearchPattern, "pattern", "", "Regex pattern to search for (for search operation)")
 	queryFlags.IntVar(&config.AfterContext, "A", 0, "Show NUM lines after each match")
@@ -197,6 +198,7 @@ func handleQueryCommand() {
 		fmt.Printf("  %s query -file logs.parquet -op tail -tail 20\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op seek -seek 1000 -limit 50\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op dump -limit 100\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op dump -raw\n", os.Args[0])
 		fmt.Printf("\n  # API:\n")
 		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op list-groups\n", os.Args[0])
 		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op by-group -group \"Running tests\"\n", os.Args[0])

@@ -11,6 +11,117 @@ import (
 	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
 )
 
+// formatLogEntries formats a slice of log entries consistently across all operations
+func formatLogEntries(entries []buildkitelogs.ParquetLogEntry, config *QueryConfig) {
+	if config.RawOutput {
+		// Raw mode: just print content to stdout
+		for _, entry := range entries {
+			fmt.Println(entry.Content)
+		}
+	} else {
+		// Formatted mode: print with timestamps and markers to stdout
+		for _, entry := range entries {
+			timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
+
+			var markers []string
+			if entry.IsCommand() {
+				markers = append(markers, "CMD")
+			}
+			if entry.IsGroup() {
+				markers = append(markers, "GRP")
+			}
+
+			markerStr := ""
+			if len(markers) > 0 {
+				markerStr = fmt.Sprintf(" [%s]", strings.Join(markers, ","))
+			}
+
+			// For group entries where group name == content, don't show duplicate
+			if entry.Group != "" && entry.Group != entry.Content {
+				fmt.Printf("[%s] [%s]%s %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					entry.Group,
+					markerStr,
+					entry.Content)
+			} else {
+				fmt.Printf("[%s]%s %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					markerStr,
+					entry.Content)
+			}
+		}
+	}
+}
+
+// formatSearchResults formats search results consistently
+func formatSearchResults(results []buildkitelogs.SearchResult, config *QueryConfig) {
+	if config.RawOutput {
+		// Raw mode: just print content to stdout
+		for _, result := range results {
+			// Print before context
+			for _, entry := range result.BeforeContext {
+				fmt.Println(entry.Content)
+			}
+			// Print match line
+			fmt.Println(result.Match.Content)
+			// Print after context
+			for _, entry := range result.AfterContext {
+				fmt.Println(entry.Content)
+			}
+		}
+	} else {
+		// Formatted mode: print with timestamps and context separators
+		for i, result := range results {
+			if i > 0 {
+				fmt.Println("--")
+			}
+
+			// Print before context
+			for _, entry := range result.BeforeContext {
+				timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
+				if entry.Group != "" {
+					fmt.Printf("[%s] [%s] %s\n",
+						timestamp.Format("2006-01-02 15:04:05.000"),
+						entry.Group,
+						entry.Content)
+				} else {
+					fmt.Printf("[%s] %s\n",
+						timestamp.Format("2006-01-02 15:04:05.000"),
+						entry.Content)
+				}
+			}
+
+			// Print match line (highlighted)
+			timestamp := time.Unix(0, result.Match.Timestamp*int64(time.Millisecond))
+			if result.Match.Group != "" {
+				fmt.Printf("[%s] [%s] MATCH: %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					result.Match.Group,
+					result.Match.Content)
+			} else {
+				fmt.Printf("[%s] MATCH: %s\n",
+					timestamp.Format("2006-01-02 15:04:05.000"),
+					result.Match.Content)
+			}
+
+			// Print after context
+			for _, entry := range result.AfterContext {
+				timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
+				if entry.Group != "" {
+					fmt.Printf("[%s] [%s] %s\n",
+						timestamp.Format("2006-01-02 15:04:05.000"),
+						entry.Group,
+						entry.Content)
+				} else {
+					fmt.Printf("[%s] %s\n",
+						timestamp.Format("2006-01-02 15:04:05.000"),
+						entry.Content)
+				}
+			}
+		}
+	}
+}
+
 // QueryConfig holds configuration for CLI query operations
 type QueryConfig struct {
 	ParquetFile  string
@@ -21,6 +132,7 @@ type QueryConfig struct {
 	LimitEntries int   // Limit output entries (0 = no limit)
 	TailLines    int   // Number of lines to show from end (for tail operation)
 	SeekToRow    int64 // Row number to seek to (0-based)
+	RawOutput    bool  // Output raw log content without timestamps, groups, or other prefixes
 	// Search operation parameters
 	SearchPattern string // Regex pattern to search for
 	AfterContext  int    // Lines to show after match
@@ -81,6 +193,8 @@ func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig)
 		return streamListGroups(reader, config, start)
 	case "list-commands":
 		return streamListCommands(reader, config, start)
+	case "info":
+		return showFileInfo(reader, config)
 	case "by-group":
 		if config.GroupName == "" {
 			return fmt.Errorf("group pattern is required for by-group operation")
@@ -91,8 +205,6 @@ func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig)
 			return fmt.Errorf("pattern is required for search operation")
 		}
 		return streamSearch(reader, config, start)
-	case "info":
-		return showFileInfo(reader, config)
 	case "tail":
 		return tailFile(reader, config, start)
 	case "seek":
@@ -319,31 +431,21 @@ func formatStreamingCommandsResult(commands []buildkitelogs.ParquetLogEntry, tot
 		return writeJSONLines(commands, os.Stdout)
 	}
 
-	// Text format
-	limitText := ""
-	if config.LimitEntries > 0 && commandCount >= config.LimitEntries {
-		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
-	}
-	fmt.Fprintf(os.Stderr, "Commands found: %d%s\n\n", commandCount, limitText)
-
-	if len(commands) == 0 {
-		fmt.Fprintln(os.Stderr, "No commands found.")
-		return nil
-	}
-
-	for _, command := range commands {
-		timestamp := time.Unix(0, command.Timestamp*int64(time.Millisecond))
-
-		if command.Group != "" {
-			fmt.Printf("[%s] [%s] %s\n",
-				timestamp.Format("2006-01-02 15:04:05.000"),
-				command.Group,
-				command.Content)
-		} else {
-			fmt.Printf("[%s] %s\n",
-				timestamp.Format("2006-01-02 15:04:05.000"),
-				command.Content)
+	// Output commands using consistent formatting
+	if !config.RawOutput {
+		limitText := ""
+		if config.LimitEntries > 0 && commandCount >= config.LimitEntries {
+			limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
 		}
+		fmt.Fprintf(os.Stderr, "Commands found: %d%s\n\n", commandCount, limitText)
+
+		if len(commands) == 0 {
+			fmt.Fprintln(os.Stderr, "No commands found.")
+		}
+	}
+
+	if len(commands) > 0 {
+		formatLogEntries(commands, config)
 	}
 
 	if config.ShowStats {
@@ -362,65 +464,21 @@ func formatSearchResultsLibrary(results []buildkitelogs.SearchResult, matchesFou
 		return writeJSONLines(results, os.Stdout)
 	}
 
-	// Text format
-	limitText := ""
-	if config.LimitEntries > 0 && matchesFound >= config.LimitEntries {
-		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+	// Output search results using consistent formatting
+	if !config.RawOutput {
+		limitText := ""
+		if config.LimitEntries > 0 && matchesFound >= config.LimitEntries {
+			limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+		}
+		fmt.Fprintf(os.Stderr, "Matches found: %d%s\n\n", matchesFound, limitText)
+
+		if len(results) == 0 {
+			fmt.Fprintln(os.Stderr, "No matches found.")
+		}
 	}
-	fmt.Fprintf(os.Stderr, "Matches found: %d%s\n\n", matchesFound, limitText)
 
-	if len(results) == 0 {
-		fmt.Fprintln(os.Stderr, "No matches found.")
-		return nil
-	}
-
-	for i, result := range results {
-		if i > 0 {
-			fmt.Println("--")
-		}
-
-		// Print before context
-		for _, entry := range result.BeforeContext {
-			timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-			if entry.Group != "" {
-				fmt.Printf("[%s] [%s] %s\n",
-					timestamp.Format("2006-01-02 15:04:05.000"),
-					entry.Group,
-					entry.Content)
-			} else {
-				fmt.Printf("[%s] %s\n",
-					timestamp.Format("2006-01-02 15:04:05.000"),
-					entry.Content)
-			}
-		}
-
-		// Print match line (highlighted)
-		timestamp := time.Unix(0, result.Match.Timestamp*int64(time.Millisecond))
-		if result.Match.Group != "" {
-			fmt.Printf("[%s] [%s] MATCH: %s\n",
-				timestamp.Format("2006-01-02 15:04:05.000"),
-				result.Match.Group,
-				result.Match.Content)
-		} else {
-			fmt.Printf("[%s] MATCH: %s\n",
-				timestamp.Format("2006-01-02 15:04:05.000"),
-				result.Match.Content)
-		}
-
-		// Print after context
-		for _, entry := range result.AfterContext {
-			timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-			if entry.Group != "" {
-				fmt.Printf("[%s] [%s] %s\n",
-					timestamp.Format("2006-01-02 15:04:05.000"),
-					entry.Group,
-					entry.Content)
-			} else {
-				fmt.Printf("[%s] %s\n",
-					timestamp.Format("2006-01-02 15:04:05.000"),
-					entry.Content)
-			}
-		}
+	if len(results) > 0 {
+		formatSearchResults(results, config)
 	}
 
 	if config.ShowStats {
@@ -438,38 +496,21 @@ func formatStreamingEntriesResult(entries []buildkitelogs.ParquetLogEntry, total
 		return writeJSONLines(entries, os.Stdout)
 	}
 
-	// Text format
-	limitText := ""
-	if config.LimitEntries > 0 && matchedEntries >= config.LimitEntries {
-		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+	// Output entries using consistent formatting
+	if !config.RawOutput {
+		limitText := ""
+		if config.LimitEntries > 0 && matchedEntries >= config.LimitEntries {
+			limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+		}
+		fmt.Fprintf(os.Stderr, "Entries in group matching '%s': %d%s\n\n", config.GroupName, matchedEntries, limitText)
+
+		if len(entries) == 0 {
+			fmt.Fprintln(os.Stderr, "No entries found for the specified group.")
+		}
 	}
-	fmt.Fprintf(os.Stderr, "Entries in group matching '%s': %d%s\n\n", config.GroupName, matchedEntries, limitText)
 
-	if len(entries) == 0 {
-		fmt.Fprintln(os.Stderr, "No entries found for the specified group.")
-		return nil
-	}
-
-	for _, entry := range entries {
-		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-
-		var markers []string
-		if entry.IsCommand() {
-			markers = append(markers, "CMD")
-		}
-		if entry.IsGroup() {
-			markers = append(markers, "GRP")
-		}
-
-		markerStr := ""
-		if len(markers) > 0 {
-			markerStr = fmt.Sprintf(" [%s]", strings.Join(markers, ","))
-		}
-
-		fmt.Printf("[%s]%s %s\n",
-			timestamp.Format("2006-01-02 15:04:05.000"),
-			markerStr,
-			entry.Content)
+	if len(entries) > 0 {
+		formatLogEntries(entries, config)
 	}
 
 	if config.ShowStats {
@@ -577,30 +618,12 @@ func formatTailResult(entries []buildkitelogs.ParquetLogEntry, totalRows, entrie
 		return writeJSONLines(entries, os.Stdout)
 	}
 
-	// Text format
-	fmt.Fprintf(os.Stderr, "Last %d entries:\n\n", entriesRead)
-
-	for _, entry := range entries {
-		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-
-		var markers []string
-		if entry.IsCommand() {
-			markers = append(markers, "CMD")
-		}
-		if entry.IsGroup() {
-			markers = append(markers, "GRP")
-		}
-
-		markerStr := ""
-		if len(markers) > 0 {
-			markerStr = fmt.Sprintf(" [%s]", strings.Join(markers, ","))
-		}
-
-		fmt.Printf("[%s]%s %s\n",
-			timestamp.Format("2006-01-02 15:04:05.000"),
-			markerStr,
-			entry.Content)
+	// Output entries using consistent formatting
+	if !config.RawOutput {
+		fmt.Fprintf(os.Stderr, "Last %d entries:\n\n", entriesRead)
 	}
+
+	formatLogEntries(entries, config)
 
 	if config.ShowStats {
 		fmt.Fprintf(os.Stderr, "\n--- Tail Statistics ---\n")
@@ -618,34 +641,16 @@ func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entries
 		return writeJSONLines(entries, os.Stdout)
 	}
 
-	// Text format
-	limitText := ""
-	if config.LimitEntries > 0 && entriesRead >= int64(config.LimitEntries) {
-		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+	// Output entries using consistent formatting
+	if !config.RawOutput {
+		limitText := ""
+		if config.LimitEntries > 0 && entriesRead >= int64(config.LimitEntries) {
+			limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+		}
+		fmt.Fprintf(os.Stderr, "Entries starting from row %d: %d%s\n\n", startRow, entriesRead, limitText)
 	}
-	fmt.Fprintf(os.Stderr, "Entries starting from row %d: %d%s\n\n", startRow, entriesRead, limitText)
 
-	for _, entry := range entries {
-		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-
-		var markers []string
-		if entry.IsCommand() {
-			markers = append(markers, "CMD")
-		}
-		if entry.IsGroup() {
-			markers = append(markers, "GRP")
-		}
-
-		markerStr := ""
-		if len(markers) > 0 {
-			markerStr = fmt.Sprintf(" [%s]", strings.Join(markers, ","))
-		}
-
-		fmt.Printf("[%s]%s %s\n",
-			timestamp.Format("2006-01-02 15:04:05.000"),
-			markerStr,
-			entry.Content)
-	}
+	formatLogEntries(entries, config)
 
 	if config.ShowStats {
 		fmt.Fprintf(os.Stderr, "\n--- Seek Statistics ---\n")
@@ -687,34 +692,16 @@ func formatDumpResult(entries []buildkitelogs.ParquetLogEntry, totalEntries int,
 		return writeJSONLines(entries, os.Stdout)
 	}
 
-	// Text format
-	limitText := ""
-	if config.LimitEntries > 0 && len(entries) >= config.LimitEntries {
-		limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+	// Output entries using consistent formatting
+	if !config.RawOutput {
+		limitText := ""
+		if config.LimitEntries > 0 && len(entries) >= config.LimitEntries {
+			limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
+		}
+		fmt.Fprintf(os.Stderr, "Entries from file: %d%s\n\n", len(entries), limitText)
 	}
-	fmt.Fprintf(os.Stderr, "Entries from file: %d%s\n\n", len(entries), limitText)
 
-	for _, entry := range entries {
-		timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-
-		var markers []string
-		if entry.IsCommand() {
-			markers = append(markers, "CMD")
-		}
-		if entry.IsGroup() {
-			markers = append(markers, "GRP")
-		}
-
-		markerStr := ""
-		if len(markers) > 0 {
-			markerStr = fmt.Sprintf(" [%s]", strings.Join(markers, ","))
-		}
-
-		fmt.Printf("[%s]%s %s\n",
-			timestamp.Format("2006-01-02 15:04:05.000"),
-			markerStr,
-			entry.Content)
-	}
+	formatLogEntries(entries, config)
 
 	if config.ShowStats {
 		fmt.Fprintf(os.Stderr, "\n--- Dump Statistics ---\n")

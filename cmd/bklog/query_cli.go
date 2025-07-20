@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,103 @@ import (
 
 	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
 )
+
+func handleQueryCommand() {
+	var config QueryConfig
+
+	queryFlags := flag.NewFlagSet("query", flag.ExitOnError)
+	queryFlags.StringVar(&config.ParquetFile, "file", "", "Path to Parquet log file (use this OR API parameters)")
+	queryFlags.StringVar(&config.Operation, "op", "list-groups", "Query operation: list-groups, list-commands, by-group, info, tail, seek, dump, search")
+	queryFlags.StringVar(&config.GroupName, "group", "", "Group name to filter by (for by-group operation)")
+	queryFlags.StringVar(&config.Format, "format", "text", "Output format: text, json")
+	queryFlags.BoolVar(&config.ShowStats, "stats", true, "Show query statistics")
+	queryFlags.IntVar(&config.LimitEntries, "limit", 0, "Limit number of entries returned (0 = no limit, enables early termination)")
+	queryFlags.IntVar(&config.TailLines, "tail", 10, "Number of lines to show from end (for tail operation)")
+	queryFlags.Int64Var(&config.SeekToRow, "seek", 0, "Row number to seek to (0-based, for seek operation)")
+	queryFlags.BoolVar(&config.RawOutput, "raw", false, "Output raw log content without timestamps, groups, or other prefixes")
+	// Search operation parameters
+	queryFlags.StringVar(&config.SearchPattern, "pattern", "", "Regex pattern to search for (for search operation)")
+	queryFlags.IntVar(&config.AfterContext, "A", 0, "Show NUM lines after each match")
+	queryFlags.IntVar(&config.BeforeContext, "B", 0, "Show NUM lines before each match")
+	queryFlags.IntVar(&config.Context, "C", 0, "Show NUM lines before and after each match")
+	queryFlags.BoolVar(&config.CaseSensitive, "case-sensitive", false, "Case-sensitive search")
+	queryFlags.BoolVar(&config.InvertMatch, "invert-match", false, "Show non-matching lines")
+	// Buildkite API parameters
+	queryFlags.StringVar(&config.Organization, "org", "", "Buildkite organization slug (for API)")
+	queryFlags.StringVar(&config.Pipeline, "pipeline", "", "Buildkite pipeline slug (for API)")
+	queryFlags.StringVar(&config.Build, "build", "", "Buildkite build number or UUID (for API)")
+	queryFlags.StringVar(&config.Job, "job", "", "Buildkite job ID (for API)")
+
+	queryFlags.Usage = func() {
+		fmt.Printf("Usage: %s query [options]\n\n", os.Args[0])
+		fmt.Println("Query Parquet log files from local files or Buildkite API.")
+		fmt.Println("\nYou must provide either:")
+		fmt.Println("  -file <path>     Local parquet file")
+		fmt.Println("  OR API params:   -org -pipeline -build -job")
+		fmt.Println("\nFor API usage, set BUILDKITE_API_TOKEN environment variable.")
+		fmt.Println("API logs are automatically downloaded and cached in ~/.bklog/")
+		fmt.Println("\nOptions:")
+		queryFlags.PrintDefaults()
+		fmt.Println("\nOperations:")
+		fmt.Println("  list-groups    List all groups with statistics")
+		fmt.Println("  list-commands  List all command entries")
+		fmt.Println("  by-group       Show entries for a specific group")
+		fmt.Println("  search         Search entries using regex pattern with context")
+		fmt.Println("  info           Show file metadata (row count, file size, etc.)")
+		fmt.Println("  tail           Show last N entries from the file")
+		fmt.Println("  seek           Start reading from a specific row number")
+		fmt.Println("  dump           Output all entries from the file")
+		fmt.Println("\nExamples:")
+		fmt.Printf("  # Local file:\n")
+		fmt.Printf("  %s query -file logs.parquet -op list-groups\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op list-commands\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op by-group -group \"Running tests\"\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"error|failed\" -C 3\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op info\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op tail -tail 20\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op seek -seek 1000 -limit 50\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op dump -limit 100\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op dump -raw\n", os.Args[0])
+		fmt.Printf("\n  # API:\n")
+		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op list-groups\n", os.Args[0])
+		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op by-group -group \"Running tests\"\n", os.Args[0])
+		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op info\n", os.Args[0])
+	}
+
+	if err := queryFlags.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+
+	// Validate that either file or API parameters are provided
+	hasFile := config.ParquetFile != ""
+	hasAPIParams := config.Organization != "" || config.Pipeline != "" || config.Build != "" || config.Job != ""
+
+	if !hasFile && !hasAPIParams {
+		fmt.Fprintf(os.Stderr, "Error: Must provide either -file or API parameters (-org, -pipeline, -build, -job)\n\n")
+		queryFlags.Usage()
+		os.Exit(1)
+	}
+
+	if hasFile && hasAPIParams {
+		fmt.Fprintf(os.Stderr, "Error: Cannot use both -file and API parameters simultaneously\n\n")
+		queryFlags.Usage()
+		os.Exit(1)
+	}
+
+	// If using API, validate all required parameters are present
+	if hasAPIParams {
+		if err := buildkitelogs.ValidateAPIParams(config.Organization, config.Pipeline, config.Build, config.Job); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
+			queryFlags.Usage()
+			os.Exit(1)
+		}
+	}
+
+	if err := runQuery(&config); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
 
 // formatLogEntries formats a slice of log entries consistently across all operations
 func formatLogEntries(entries []buildkitelogs.ParquetLogEntry, config *QueryConfig) {

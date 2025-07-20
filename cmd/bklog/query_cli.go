@@ -33,6 +33,9 @@ func handleQueryCommand() {
 	queryFlags.BoolVar(&config.CaseSensitive, "case-sensitive", false, "Case-sensitive search")
 	queryFlags.BoolVar(&config.InvertMatch, "invert-match", false, "Show non-matching lines")
 	// Buildkite API parameters
+	// ANSI processing flag
+	queryFlags.BoolVar(&config.StripANSI, "strip-ansi", false, "Strip ANSI escape codes from log content")
+	// Buildkite API parameters
 	queryFlags.StringVar(&config.Organization, "org", "", "Buildkite organization slug (for API)")
 	queryFlags.StringVar(&config.Pipeline, "pipeline", "", "Buildkite pipeline slug (for API)")
 	queryFlags.StringVar(&config.Build, "build", "", "Buildkite build number or UUID (for API)")
@@ -68,6 +71,7 @@ func handleQueryCommand() {
 		fmt.Printf("  %s query -file logs.parquet -op seek -seek 1000 -limit 50\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op dump -limit 100\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op dump -raw\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op dump -strip-ansi\n", os.Args[0])
 		fmt.Printf("\n  # API:\n")
 		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op list-groups\n", os.Args[0])
 		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op by-group -group \"Running tests\"\n", os.Args[0])
@@ -114,7 +118,8 @@ func formatLogEntries(entries []buildkitelogs.ParquetLogEntry, config *QueryConf
 	if config.RawOutput {
 		// Raw mode: just print content to stdout
 		for _, entry := range entries {
-			fmt.Println(entry.Content)
+			content := entry.CleanContent(config.StripANSI)
+			fmt.Println(content)
 		}
 	} else {
 		// Formatted mode: print with timestamps and markers to stdout
@@ -134,18 +139,21 @@ func formatLogEntries(entries []buildkitelogs.ParquetLogEntry, config *QueryConf
 				markerStr = fmt.Sprintf(" [%s]", strings.Join(markers, ","))
 			}
 
+			content := entry.CleanContent(config.StripANSI)
+			group := entry.CleanGroup(config.StripANSI)
+
 			// For group entries where group name == content, don't show duplicate
-			if entry.Group != "" && entry.Group != entry.Content {
+			if group != "" && group != content {
 				fmt.Printf("[%s] [%s]%s %s\n",
 					timestamp.Format("2006-01-02 15:04:05.000"),
-					entry.Group,
+					group,
 					markerStr,
-					entry.Content)
+					content)
 			} else {
 				fmt.Printf("[%s]%s %s\n",
 					timestamp.Format("2006-01-02 15:04:05.000"),
 					markerStr,
-					entry.Content)
+					content)
 			}
 		}
 	}
@@ -158,13 +166,16 @@ func formatSearchResults(results []buildkitelogs.SearchResult, config *QueryConf
 		for _, result := range results {
 			// Print before context
 			for _, entry := range result.BeforeContext {
-				fmt.Println(entry.Content)
+				content := entry.CleanContent(config.StripANSI)
+				fmt.Println(content)
 			}
 			// Print match line
-			fmt.Println(result.Match.Content)
+			content := result.Match.CleanContent(config.StripANSI)
+			fmt.Println(content)
 			// Print after context
 			for _, entry := range result.AfterContext {
-				fmt.Println(entry.Content)
+				content := entry.CleanContent(config.StripANSI)
+				fmt.Println(content)
 			}
 		}
 	} else {
@@ -177,43 +188,49 @@ func formatSearchResults(results []buildkitelogs.SearchResult, config *QueryConf
 			// Print before context
 			for _, entry := range result.BeforeContext {
 				timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-				if entry.Group != "" {
+				content := entry.CleanContent(config.StripANSI)
+				group := entry.CleanGroup(config.StripANSI)
+				if group != "" {
 					fmt.Printf("[%s] [%s] %s\n",
 						timestamp.Format("2006-01-02 15:04:05.000"),
-						entry.Group,
-						entry.Content)
+						group,
+						content)
 				} else {
 					fmt.Printf("[%s] %s\n",
 						timestamp.Format("2006-01-02 15:04:05.000"),
-						entry.Content)
+						content)
 				}
 			}
 
 			// Print match line (highlighted)
 			timestamp := time.Unix(0, result.Match.Timestamp*int64(time.Millisecond))
-			if result.Match.Group != "" {
+			content := result.Match.CleanContent(config.StripANSI)
+			group := result.Match.CleanGroup(config.StripANSI)
+			if group != "" {
 				fmt.Printf("[%s] [%s] MATCH: %s\n",
 					timestamp.Format("2006-01-02 15:04:05.000"),
-					result.Match.Group,
-					result.Match.Content)
+					group,
+					content)
 			} else {
 				fmt.Printf("[%s] MATCH: %s\n",
 					timestamp.Format("2006-01-02 15:04:05.000"),
-					result.Match.Content)
+					content)
 			}
 
 			// Print after context
 			for _, entry := range result.AfterContext {
 				timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
-				if entry.Group != "" {
+				content := entry.CleanContent(config.StripANSI)
+				group := entry.CleanGroup(config.StripANSI)
+				if group != "" {
 					fmt.Printf("[%s] [%s] %s\n",
 						timestamp.Format("2006-01-02 15:04:05.000"),
-						entry.Group,
-						entry.Content)
+						group,
+						content)
 				} else {
 					fmt.Printf("[%s] %s\n",
 						timestamp.Format("2006-01-02 15:04:05.000"),
-						entry.Content)
+						content)
 				}
 			}
 		}
@@ -238,6 +255,8 @@ type QueryConfig struct {
 	Context       int    // Lines to show before and after match
 	CaseSensitive bool   // Case-sensitive search
 	InvertMatch   bool   // Show non-matching lines
+	// ANSI processing
+	StripANSI bool // Strip ANSI escape codes from log content
 	// Buildkite API parameters
 	Organization string
 	Pipeline     string

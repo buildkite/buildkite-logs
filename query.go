@@ -86,6 +86,24 @@ func (entry *ParquetLogEntry) IsGroup() bool {
 	return entry.Flags.IsGroup()
 }
 
+// CleanContent returns the content with optional ANSI stripping and whitespace trimming
+func (entry *ParquetLogEntry) CleanContent(stripANSI bool) string {
+	content := entry.Content
+	if stripANSI {
+		content = StripANSI(content)
+	}
+	return strings.TrimSpace(content)
+}
+
+// CleanGroup returns the group name with optional ANSI stripping and whitespace trimming
+func (entry *ParquetLogEntry) CleanGroup(stripANSI bool) string {
+	group := entry.Group
+	if stripANSI {
+		group = StripANSI(group)
+	}
+	return strings.TrimSpace(group)
+}
+
 // GroupInfo contains statistical information about a log group
 type GroupInfo struct {
 	Name       string    `json:"name"`

@@ -179,16 +179,7 @@ func BenchmarkIteratorWithFiltering(b *testing.B) {
 	}
 }
 
-// BenchmarkANSIStripping tests ANSI code removal performance
-func BenchmarkANSIStripping(b *testing.B) {
-	parser := NewParser()
-	content := "[38;5;48m2025-04-22 11:43:30 INFO[0m [0mFound 2 files that match \"artifacts/*\"[0m"
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = parser.StripANSI(content)
-	}
-}
+// BenchmarkANSIStripping removed - ANSI stripping functionality removed
 
 // BenchmarkMemoryUsage provides a rough comparison of memory allocation patterns
 func BenchmarkMemoryUsage(b *testing.B) {
@@ -443,15 +434,6 @@ func BenchmarkContentClassification(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			for _, entry := range entries {
 				_ = entry.IsGroup()
-			}
-		}
-	})
-
-	b.Run("clean_content", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for _, entry := range entries {
-				_ = entry.CleanContent()
 			}
 		}
 	})

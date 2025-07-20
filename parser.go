@@ -46,7 +46,7 @@ func (p *Parser) ParseLine(line string) (*LogEntry, error) {
 
 	// Update current group if this is a group header
 	if entry.IsGroup() {
-		p.currentGroup = entry.CleanContent()
+		p.currentGroup = entry.Content
 	}
 
 	// Set the group for this entry
@@ -123,17 +123,6 @@ func (iter *LogIterator) Err() error {
 	return iter.err
 }
 
-// StripANSI removes ANSI escape sequences from content
-func (p *Parser) StripANSI(content string) string {
-	return p.byteParser.StripANSI(content)
-}
-
-// CleanContent returns the content with ANSI codes stripped
-func (entry *LogEntry) CleanContent() string {
-	parser := NewParser()
-	return parser.StripANSI(entry.Content)
-}
-
 // HasTimestamp returns true if the log entry has a valid timestamp
 func (entry *LogEntry) HasTimestamp() bool {
 	return !entry.Timestamp.IsZero()
@@ -141,14 +130,12 @@ func (entry *LogEntry) HasTimestamp() bool {
 
 // IsCommand returns true if the log entry appears to be a command execution
 func (entry *LogEntry) IsCommand() bool {
-	clean := entry.CleanContent()
-	return strings.HasPrefix(clean, "$ ")
+	return strings.HasPrefix(entry.Content, "$ ")
 }
 
 // IsGroup returns true if the log entry appears to be a group header
 func (entry *LogEntry) IsGroup() bool {
-	content := entry.CleanContent()
-	return strings.HasPrefix(content, "~~~ ") || strings.HasPrefix(content, "--- ") || strings.HasPrefix(content, "+++ ")
+	return strings.HasPrefix(entry.Content, "~~~ ") || strings.HasPrefix(entry.Content, "--- ") || strings.HasPrefix(entry.Content, "+++ ")
 }
 
 // IsSection is deprecated, use IsGroup instead

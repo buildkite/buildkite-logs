@@ -18,11 +18,8 @@ func createNewFileWriter(schema *arrow.Schema, file *os.File, pool memory.Alloca
 	writer, err := pqarrow.NewFileWriter(schema, file,
 		parquet.NewWriterProperties(
 			parquet.WithCompression(compress.Codecs.Zstd),
-			parquet.WithCompressionLevel(3),
-			parquet.WithSortingColumns([]parquet.SortingColumn{
-				{ColumnIdx: 0, Descending: false, NullsFirst: true}, // Timestamp
-				{ColumnIdx: 2, Descending: false, NullsFirst: true}, // Group
-			}),
+			parquet.WithCompressionLevel(5),
+			// Removed sorting to preserve insertion order
 		),
 		pqarrow.NewArrowWriterProperties(
 			pqarrow.WithAllocator(pool),
@@ -39,17 +36,16 @@ func createNewFileWriter(schema *arrow.Schema, file *os.File, pool memory.Alloca
 func createArrowSchema() *arrow.Schema {
 	return arrow.NewSchema([]arrow.Field{
 		{Name: "timestamp", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
-		{Name: "content", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}, Nullable: false},
-		{Name: "group", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}, Nullable: false},
+		{Name: "content", Type: arrow.BinaryTypes.String, Nullable: false},
+		{Name: "group", Type: arrow.BinaryTypes.String, Nullable: false},
 		{Name: "flags", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
 	}, nil)
 }
 
 // createRecordFromEntries creates an Arrow record from log entries using the writer's builders
 func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Record, error) {
-	// Reset dictionary builders for new batch (preserves dictionaries)
-	pw.contentBuilder.ResetFull()
-	pw.groupBuilder.ResetFull()
+	// String builders reset automatically after NewArray() call
+	// No explicit reset needed for StringBuilder
 
 	// Reserve capacity
 	numEntries := len(entries)
@@ -61,12 +57,8 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 	// Populate arrays
 	for _, entry := range entries {
 		pw.timestampBuilder.Append(entry.Timestamp.UnixMilli())
-		if err := pw.contentBuilder.Append([]byte(entry.Content)); err != nil {
-			return nil, err
-		}
-		if err := pw.groupBuilder.Append([]byte(entry.Group)); err != nil {
-			return nil, err
-		}
+		pw.contentBuilder.Append(entry.Content)
+		pw.groupBuilder.Append(entry.Group)
 		pw.flagsBuilder.Append(int32(entry.ComputeFlags()))
 	}
 
@@ -97,10 +89,10 @@ type ParquetWriter struct {
 	pool   memory.Allocator
 	schema *arrow.Schema
 
-	// Persistent builders for dictionary encoding across batches
+	// Persistent builders for string encoding
 	timestampBuilder *array.Int64Builder
-	contentBuilder   *array.BinaryDictionaryBuilder
-	groupBuilder     *array.BinaryDictionaryBuilder
+	contentBuilder   *array.StringBuilder
+	groupBuilder     *array.StringBuilder
 	flagsBuilder     *array.Int32Builder
 }
 
@@ -120,10 +112,10 @@ func NewParquetWriter(file *os.File) *ParquetWriter {
 		pool:   pool,
 		schema: schema,
 
-		// Initialize builders once for dictionary encoding across batches
+		// Initialize builders for string encoding
 		timestampBuilder: array.NewInt64Builder(pool),
-		contentBuilder:   array.NewDictionaryBuilder(pool, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}).(*array.BinaryDictionaryBuilder),
-		groupBuilder:     array.NewDictionaryBuilder(pool, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.String}).(*array.BinaryDictionaryBuilder),
+		contentBuilder:   array.NewStringBuilder(pool),
+		groupBuilder:     array.NewStringBuilder(pool),
 		flagsBuilder:     array.NewInt32Builder(pool),
 	}
 }

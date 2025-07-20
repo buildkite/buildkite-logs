@@ -506,7 +506,6 @@ Output:
 
 ## Log Entry Types
 
-The parser can classify log entries into different types:
 
 ### Commands
 Lines that represent shell commands being executed:

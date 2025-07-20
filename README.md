@@ -2,6 +2,7 @@
 
 A Go library and CLI tool for parsing Buildkite log files that contain OSC (Operating System Command) sequences with timestamps.
 
+[![Build status](https://badge.buildkite.com/e17b73d584291c31c6a95c657687d9049d225b93d9f3c3fcd2.svg)](https://buildkite.com/mark-at-wolfe-dot-id-dot-au/buildkite-logs-parquet)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wolfeidau/buildkite-logs-parquet)](https://goreportcard.com/report/github.com/wolfeidau/buildkite-logs-parquet) 
 [![Documentation](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/wolfeidau/buildkite-logs-parquet)
 

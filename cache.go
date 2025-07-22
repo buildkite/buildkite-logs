@@ -1,9 +1,11 @@
 package buildkitelogs
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // GetCacheDir returns the cache directory path, creating it if it doesn't exist
@@ -55,30 +57,72 @@ func IsCacheFileExists(org, pipeline, build, job string) (bool, string, error) {
 	return true, cacheFilePath, nil
 }
 
-// DownloadAndCache downloads logs from the Buildkite API and caches them as a parquet file
-func DownloadAndCache(apiToken, org, pipeline, build, job, version string) (string, error) {
-	// Check if cache file already exists
-	exists, cacheFilePath, err := IsCacheFileExists(org, pipeline, build, job)
+// DownloadAndCacheBlobStorage downloads logs using blob storage backend
+func DownloadAndCacheBlobStorage(ctx context.Context, apiToken, org, pipeline, build, job, version, storageURL string, ttl time.Duration, forceRefresh bool) (string, error) {
+	if ttl == 0 {
+		ttl = 30 * time.Second // Default TTL from PRD
+	}
+
+	// Initialize blob storage
+	blobStorage, err := NewBlobStorage(ctx, storageURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to initialize blob storage: %w", err)
 	}
+	defer blobStorage.Close()
 
-	if exists {
-		return cacheFilePath, nil
-	}
-
-	// Download logs from API
 	client := NewBuildkiteAPIClient(apiToken, version)
+	blobKey := GenerateBlobKey(org, pipeline, build, job)
+
+	// Check if blob already exists
+	exists, err := blobStorage.Exists(blobKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to check blob existence: %w", err)
+	}
+
+	// Get job status to determine caching strategy
+	jobStatus, err := client.GetJobStatus(org, pipeline, build, job)
+	if err != nil {
+		return "", fmt.Errorf("failed to get job status: %w", err)
+	}
+
+	// Check if we should use existing cache
+	if exists && !forceRefresh {
+		_, metadata, err := blobStorage.ReadWithMetadata(blobKey)
+		if err == nil && metadata != nil {
+			// For terminal jobs, always use cache
+			if metadata.IsTerminal {
+				return createLocalCacheFile(ctx, blobStorage, blobKey, org, pipeline, build, job)
+			}
+
+			// For non-terminal jobs, check TTL
+			timeElapsed := time.Since(metadata.CachedAt)
+			if timeElapsed < ttl {
+				return createLocalCacheFile(ctx, blobStorage, blobKey, org, pipeline, build, job)
+			}
+		}
+	}
+
+	// Download fresh logs from API
 	logReader, err := client.GetJobLog(org, pipeline, build, job)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch logs from API: %w", err)
 	}
 	defer logReader.Close()
 
-	// Parse and export to parquet
+	// Parse logs and convert to parquet data
 	parser := NewParser()
+	var parquetData []byte
 
-	// Create filter function (no filtering for cache)
+	// Create a temporary file for parquet export
+	tempFile, err := os.CreateTemp("", "bklog-*.parquet")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	tempFile.Close()          // Close immediately so export can write to it
+	defer os.Remove(tempPath) // Clean up temp file
+
+	// Export to temporary parquet file
 	countingSeq := func(yield func(*LogEntry, error) bool) {
 		for entry, err := range parser.All(logReader) {
 			if !yield(entry, err) {
@@ -87,11 +131,74 @@ func DownloadAndCache(apiToken, org, pipeline, build, job, version string) (stri
 		}
 	}
 
-	// Export to cache file
-	err = ExportSeq2ToParquetWithFilter(countingSeq, cacheFilePath, nil)
+	err = ExportSeq2ToParquetWithFilter(countingSeq, tempPath, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to export to cache: %w", err)
+		return "", fmt.Errorf("failed to export to parquet: %w", err)
+	}
+
+	// Read parquet data from temp file
+	parquetData, err = os.ReadFile(tempPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read parquet data: %w", err)
+	}
+
+	// Create metadata
+	metadata := &BlobMetadata{
+		JobID:        job,
+		JobState:     string(jobStatus.State),
+		IsTerminal:   jobStatus.IsTerminal,
+		CachedAt:     time.Now(),
+		TTL:          ttl.String(),
+		Organization: org,
+		Pipeline:     pipeline,
+		Build:        build,
+	}
+
+	// Store in blob storage with metadata
+	err = blobStorage.WriteWithMetadata(blobKey, parquetData, metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to write to blob storage: %w", err)
+	}
+
+	// Return local cache file path
+	return createLocalCacheFile(ctx, blobStorage, blobKey, org, pipeline, build, job)
+}
+
+// createLocalCacheFile creates a local file from blob storage for compatibility
+func createLocalCacheFile(ctx context.Context, blobStorage *BlobStorage, blobKey, org, pipeline, build, job string) (string, error) {
+	// Get local cache file path for compatibility
+	cacheFilePath, err := GetCacheFilePath(org, pipeline, build, job)
+	if err != nil {
+		return "", err
+	}
+
+	// Read from blob storage
+	data, _, err := blobStorage.ReadWithMetadata(blobKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to read from blob storage: %w", err)
+	}
+
+	// Write to local cache file
+	err = os.WriteFile(cacheFilePath, data, 0600)
+	if err != nil {
+		return "", fmt.Errorf("failed to write local cache file: %w", err)
 	}
 
 	return cacheFilePath, nil
+}
+
+// DownloadAndCache downloads logs from the Buildkite API with smart caching based on job status
+// ttl: time-to-live for non-terminal jobs (default: 30 seconds)
+// forceRefresh: bypass cache and force download
+// storageURL: blob storage URL (empty string uses default)
+func DownloadAndCache(apiToken, org, pipeline, build, job, version, storageURL string, ttl time.Duration, forceRefresh bool) (string, error) {
+	// Use blob storage backend
+	ctx := context.Background()
+	return DownloadAndCacheBlobStorage(ctx, apiToken, org, pipeline, build, job, version, storageURL, ttl, forceRefresh)
+}
+
+// Deprecated: Use DownloadAndCache with TTL and storage URL parameters instead
+// DownloadAndCacheLegacy maintains backward compatibility
+func DownloadAndCacheLegacy(apiToken, org, pipeline, build, job, version string) (string, error) {
+	return DownloadAndCache(apiToken, org, pipeline, build, job, version, "", 30*time.Second, false)
 }

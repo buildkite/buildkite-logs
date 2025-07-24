@@ -1,70 +1,65 @@
 package buildkitelogs
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/buildkite/go-buildkite/v4"
 )
 
 // BuildkiteAPIClient provides methods to interact with the Buildkite API
+// Now wraps the official go-buildkite v4 client
 type BuildkiteAPIClient struct {
-	apiToken  string
-	baseURL   string
+	client    *buildkite.Client
 	userAgent string
-	client    *http.Client
 }
 
-// NewBuildkiteAPIClient creates a new Buildkite API client
+// NewBuildkiteAPIClient creates a new Buildkite API client using go-buildkite v4
 func NewBuildkiteAPIClient(apiToken, version string) *BuildkiteAPIClient {
 	userAgent := fmt.Sprintf("buildkite-logs-parquet/%s (Go; %s; %s)", version, runtime.GOOS, runtime.GOARCH)
 
+	httpClient := &http.Client{
+		Timeout: time.Second * 30,
+	}
+
+	client, _ := buildkite.NewOpts(
+		buildkite.WithTokenAuth(apiToken),
+		buildkite.WithUserAgent(userAgent),
+		buildkite.WithHTTPClient(httpClient),
+	)
+
 	return &BuildkiteAPIClient{
-		apiToken:  apiToken,
-		baseURL:   "https://api.buildkite.com/v2",
+		client:    client,
 		userAgent: userAgent,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
 	}
 }
 
-// GetJobLog fetches the log output for a specific job
+// GetJobLog fetches the log output for a specific job using go-buildkite
 // org: organization slug
 // pipeline: pipeline slug
 // build: build number or UUID
 // job: job ID
 func (c *BuildkiteAPIClient) GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error) {
-	if c.apiToken == "" {
-		return nil, fmt.Errorf("API token is required")
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	url := fmt.Sprintf("%s/organizations/%s/pipelines/%s/builds/%s/jobs/%s/log",
-		c.baseURL, org, pipeline, build, job)
-
-	req, err := http.NewRequest("GET", url, nil)
+	jobLog, _, err := c.client.Jobs.GetJobLog(ctx, org, pipeline, build, job)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to get job log: %w", err)
 	}
 
-	// Set headers
-	req.Header.Set("Authorization", "Bearer "+c.apiToken)
-	req.Header.Set("Accept", "text/plain")
-	req.Header.Set("User-Agent", c.userAgent)
+	// Convert JobLog content to io.ReadCloser
+	return io.NopCloser(strings.NewReader(jobLog.Content)), nil
+}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, resp.Status)
-	}
-
-	return resp.Body, nil
+// GetJobStatus gets the current status of a job with retry logic
+func (c *BuildkiteAPIClient) GetJobStatus(org, pipeline, build, job string) (*JobStatus, error) {
+	return GetJobStatus(c.client, org, pipeline, build, job)
 }
 
 // ValidateAPIParams validates that all required API parameters are provided

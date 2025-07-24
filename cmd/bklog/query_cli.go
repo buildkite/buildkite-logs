@@ -40,6 +40,10 @@ func handleQueryCommand() {
 	queryFlags.StringVar(&config.Pipeline, "pipeline", "", "Buildkite pipeline slug (for API)")
 	queryFlags.StringVar(&config.Build, "build", "", "Buildkite build number or UUID (for API)")
 	queryFlags.StringVar(&config.Job, "job", "", "Buildkite job ID (for API)")
+	// Smart caching parameters
+	queryFlags.DurationVar(&config.CacheTTL, "cache-ttl", 30*time.Second, "Cache TTL for non-terminal jobs")
+	queryFlags.BoolVar(&config.ForceRefresh, "cache-force-refresh", false, "Force refresh cached entry")
+	queryFlags.StringVar(&config.CacheURL, "cache-url", "", "Cache storage URL (file://path, s3://bucket, etc)")
 
 	queryFlags.Usage = func() {
 		fmt.Printf("Usage: %s query [options]\n\n", os.Args[0])
@@ -49,6 +53,7 @@ func handleQueryCommand() {
 		fmt.Println("  OR API params:   -org -pipeline -build -job")
 		fmt.Println("\nFor API usage, set BUILDKITE_API_TOKEN environment variable.")
 		fmt.Println("API logs are automatically downloaded and cached in ~/.bklog/")
+		fmt.Println("Smart caching: Terminal jobs are cached permanently, non-terminal jobs use TTL.")
 		fmt.Println("\nOptions:")
 		queryFlags.PrintDefaults()
 		fmt.Println("\nOperations:")
@@ -76,6 +81,9 @@ func handleQueryCommand() {
 		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op list-groups\n", os.Args[0])
 		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op by-group -group \"Running tests\"\n", os.Args[0])
 		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op info\n", os.Args[0])
+		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op info -cache-force-refresh\n", os.Args[0])
+		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op list-groups -cache-ttl=60s\n", os.Args[0])
+		fmt.Printf("  %s query -org myorg -pipeline mypipe -build 123 -job abc-def -op info -cache-url=file:///tmp/cache\n", os.Args[0])
 	}
 
 	if err := queryFlags.Parse(os.Args[2:]); err != nil {
@@ -262,6 +270,10 @@ type QueryConfig struct {
 	Pipeline     string
 	Build        string
 	Job          string
+	// Smart caching parameters
+	CacheTTL     time.Duration // Cache TTL for non-terminal jobs
+	ForceRefresh bool          // Force refresh cached entry
+	CacheURL     string        // Cache storage URL
 }
 
 // runQuery executes a query using streaming iterators
@@ -290,7 +302,7 @@ func resolveParquetFilePath(config *QueryConfig) (string, error) {
 			return "", fmt.Errorf("BUILDKITE_API_TOKEN environment variable is required for API access")
 		}
 
-		cacheFilePath, err := buildkitelogs.DownloadAndCache(apiToken, config.Organization, config.Pipeline, config.Build, config.Job, version)
+		cacheFilePath, err := buildkitelogs.DownloadAndCache(apiToken, config.Organization, config.Pipeline, config.Build, config.Job, version, config.CacheURL, config.CacheTTL, config.ForceRefresh)
 		if err != nil {
 			return "", fmt.Errorf("failed to download and cache logs: %w", err)
 		}

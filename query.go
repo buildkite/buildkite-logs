@@ -121,6 +121,8 @@ type SearchOptions struct {
 	BeforeContext int    // Lines to show before match
 	AfterContext  int    // Lines to show after match
 	Context       int    // Lines to show before and after (overrides BeforeContext/AfterContext)
+	Reverse       bool   // Search backwards from end/seek position
+	SeekStart     int64  // Start search from this row (useful with Reverse)
 }
 
 // SearchResult represents a match with context lines
@@ -588,73 +590,170 @@ func searchParquetFileIter(filename string, options SearchOptions) iter.Seq2[Sea
 			afterContext = options.Context
 		}
 
-		// Stream entries and perform search with context buffering
-		var beforeBuffer []ParquetLogEntry
-		var afterCollecting int
-		var currentResult *SearchResult
-		totalEntries := int64(0)
+		// Handle reverse search by collecting all entries first
+		if options.Reverse {
+			searchReverseParquetFileIter(filename, options, regex, beforeContext, afterContext, yield)
+			return
+		}
 
-		for entry, err := range readParquetFileIter(filename) {
-			if err != nil {
-				yield(SearchResult{}, err)
-				return
-			}
+		// Forward search (original implementation)
+		searchForwardParquetFileIter(filename, options, regex, beforeContext, afterContext, yield)
+	}
+}
 
-			totalEntries++
+// searchForwardParquetFileIter implements forward search (original behavior)
+func searchForwardParquetFileIter(filename string, options SearchOptions, regex *regexp.Regexp, beforeContext, afterContext int, yield func(SearchResult, error) bool) {
+	// Stream entries and perform search with context buffering
+	var beforeBuffer []ParquetLogEntry
+	var afterCollecting int
+	var currentResult *SearchResult
+	totalEntries := int64(0)
 
-			// Handle after-context collection
-			if afterCollecting > 0 && currentResult != nil {
-				currentResult.AfterContext = append(currentResult.AfterContext, entry)
-				afterCollecting--
-				if afterCollecting == 0 {
-					// Yield the completed result
-					if !yield(*currentResult, nil) {
-						return
-					}
-					currentResult = nil
+	// Determine starting iterator
+	var entryIter iter.Seq2[ParquetLogEntry, error]
+	if options.SeekStart > 0 {
+		entryIter = readParquetFileFromRowIter(filename, options.SeekStart)
+		totalEntries = options.SeekStart
+	} else {
+		entryIter = readParquetFileIter(filename)
+	}
+
+	for entry, err := range entryIter {
+		if err != nil {
+			yield(SearchResult{}, err)
+			return
+		}
+
+		totalEntries++
+
+		// Handle after-context collection
+		if afterCollecting > 0 && currentResult != nil {
+			currentResult.AfterContext = append(currentResult.AfterContext, entry)
+			afterCollecting--
+			if afterCollecting == 0 {
+				// Yield the completed result
+				if !yield(*currentResult, nil) {
+					return
 				}
-			}
-
-			// Test match
-			isMatch := regex.MatchString(entry.Content)
-			if options.InvertMatch {
-				isMatch = !isMatch
-			}
-
-			if isMatch {
-				result := SearchResult{
-					Match:         entry,
-					BeforeContext: make([]ParquetLogEntry, len(beforeBuffer)),
-					AfterContext:  make([]ParquetLogEntry, 0, afterContext),
-					LineNumber:    totalEntries - 1,
-				}
-				copy(result.BeforeContext, beforeBuffer)
-
-				// If no after-context needed, yield immediately
-				if afterContext == 0 {
-					if !yield(result, nil) {
-						return
-					}
-				} else {
-					// Set up after-context collection
-					currentResult = &result
-					afterCollecting = afterContext
-				}
-
-				// Clear before buffer after match
-				beforeBuffer = beforeBuffer[:0]
-			} else if beforeContext > 0 {
-				// Maintain rolling before-context buffer
-				if len(beforeBuffer) >= beforeContext {
-					beforeBuffer = beforeBuffer[1:]
-				}
-				beforeBuffer = append(beforeBuffer, entry)
+				currentResult = nil
 			}
 		}
 
-		// If we have a pending result waiting for after-context, yield it
-		if currentResult != nil {
-			yield(*currentResult, nil)
+		// Test match
+		isMatch := regex.MatchString(entry.Content)
+		if options.InvertMatch {
+			isMatch = !isMatch
+		}
+
+		if isMatch {
+			result := SearchResult{
+				Match:         entry,
+				BeforeContext: make([]ParquetLogEntry, len(beforeBuffer)),
+				AfterContext:  make([]ParquetLogEntry, 0, afterContext),
+				LineNumber:    totalEntries - 1,
+			}
+			copy(result.BeforeContext, beforeBuffer)
+
+			// If no after-context needed, yield immediately
+			if afterContext == 0 {
+				if !yield(result, nil) {
+					return
+				}
+			} else {
+				// Set up after-context collection
+				currentResult = &result
+				afterCollecting = afterContext
+			}
+
+			// Clear before buffer after match
+			beforeBuffer = beforeBuffer[:0]
+		} else if beforeContext > 0 {
+			// Maintain rolling before-context buffer
+			if len(beforeBuffer) >= beforeContext {
+				beforeBuffer = beforeBuffer[1:]
+			}
+			beforeBuffer = append(beforeBuffer, entry)
+		}
+	}
+
+	// If we have a pending result waiting for after-context, yield it
+	if currentResult != nil {
+		yield(*currentResult, nil)
+	}
+}
+
+// searchReverseParquetFileIter implements reverse search by collecting entries first
+func searchReverseParquetFileIter(filename string, options SearchOptions, regex *regexp.Regexp, beforeContext, afterContext int, yield func(SearchResult, error) bool) {
+	// First, collect all entries into a slice
+	var allEntries []ParquetLogEntry
+
+	// For reverse search, we always need to read all entries first
+	entryIter := readParquetFileIter(filename)
+
+	for entry, err := range entryIter {
+		if err != nil {
+			yield(SearchResult{}, err)
+			return
+		}
+		allEntries = append(allEntries, entry)
+	}
+
+	if len(allEntries) == 0 {
+		return
+	}
+
+	// Determine the starting position for reverse search
+	startIdx := len(allEntries) - 1
+	if options.SeekStart > 0 && options.SeekStart < int64(len(allEntries)) {
+		startIdx = int(options.SeekStart)
+	}
+
+	// Search backwards from startIdx
+	for i := startIdx; i >= 0; i-- {
+		entry := allEntries[i]
+
+		// Test match
+		isMatch := regex.MatchString(entry.Content)
+		if options.InvertMatch {
+			isMatch = !isMatch
+		}
+
+		if isMatch {
+			result := SearchResult{
+				Match:      entry,
+				LineNumber: int64(i),
+			}
+
+			// Collect before context (entries that come before in reverse = higher indices)
+			if beforeContext > 0 {
+				beforeStart := i + 1
+				beforeEnd := i + 1 + beforeContext
+				if beforeEnd > len(allEntries) {
+					beforeEnd = len(allEntries)
+				}
+				if beforeStart < beforeEnd {
+					result.BeforeContext = make([]ParquetLogEntry, beforeEnd-beforeStart)
+					copy(result.BeforeContext, allEntries[beforeStart:beforeEnd])
+				}
+			}
+
+			// Collect after context (entries that come after in reverse = lower indices)
+			if afterContext > 0 {
+				afterStart := i - afterContext
+				afterEnd := i
+				if afterStart < 0 {
+					afterStart = 0
+				}
+				if afterStart < afterEnd {
+					result.AfterContext = make([]ParquetLogEntry, afterEnd-afterStart)
+					copy(result.AfterContext, allEntries[afterStart:afterEnd])
+				}
+			}
+
+			// Yield the result
+			if !yield(result, nil) {
+				return
+			}
 		}
 	}
 }

@@ -295,6 +295,16 @@ Matches found: 2
 ./build/bklog query -file output.parquet -op search -pattern "buildkite" --invert-match -limit 5
 ```
 
+**Reverse search (find recent errors first):**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "error|failed" --reverse -C 2
+```
+
+**Reverse search from specific position:**
+```bash
+./build/bklog query -file output.parquet -op search -pattern "test.*failed" --reverse --search-seek 1000
+```
+
 **Search with JSON output:**
 ```bash
 ./build/bklog query -file output.parquet -op search -pattern "git clone" -format json -C 1
@@ -377,6 +387,12 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "ERROR" --case-sensitive
+```
+
+**Reverse search API logs (find recent failures):**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "test.*failed" --reverse -C 2
 ```
 
 **Query last 10 entries from API logs:**
@@ -620,6 +636,8 @@ Output:
 - `-C <num>`: Show NUM lines before and after each match (ripgrep-style)
 - `-case-sensitive`: Enable case-sensitive search (default: case-insensitive)
 - `-invert-match`: Show non-matching lines instead of matching ones
+- `--reverse`: Search backwards from end/seek position (useful for finding recent errors first)
+- `--search-seek <row>`: Start search from this row number (0-based, useful with `--reverse`)
 
 #### Debug Command
 ```bash

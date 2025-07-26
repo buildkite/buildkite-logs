@@ -32,6 +32,8 @@ func handleQueryCommand() {
 	queryFlags.IntVar(&config.Context, "C", 0, "Show NUM lines before and after each match")
 	queryFlags.BoolVar(&config.CaseSensitive, "case-sensitive", false, "Case-sensitive search")
 	queryFlags.BoolVar(&config.InvertMatch, "invert-match", false, "Show non-matching lines")
+	queryFlags.BoolVar(&config.Reverse, "reverse", false, "Search backwards from end/seek position")
+	queryFlags.Int64Var(&config.SearchSeek, "search-seek", 0, "Start search from this row (useful with --reverse)")
 	// Buildkite API parameters
 	// ANSI processing flag
 	queryFlags.BoolVar(&config.StripANSI, "strip-ansi", false, "Strip ANSI escape codes from log content")
@@ -71,6 +73,8 @@ func handleQueryCommand() {
 		fmt.Printf("  %s query -file logs.parquet -op list-commands\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op by-group -group \"Running tests\"\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"error|failed\" -C 3\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"test.*failed\" --reverse -C 2\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"setup\" --reverse --search-seek 1000\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op info\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op tail -tail 20\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op seek -seek 1000 -limit 50\n", os.Args[0])
@@ -263,6 +267,8 @@ type QueryConfig struct {
 	Context       int    // Lines to show before and after match
 	CaseSensitive bool   // Case-sensitive search
 	InvertMatch   bool   // Show non-matching lines
+	Reverse       bool   // Search backwards from end/seek position
+	SearchSeek    int64  // Start search from this row (useful with Reverse)
 	// ANSI processing
 	StripANSI bool // Strip ANSI escape codes from log content
 	// Buildkite API parameters
@@ -449,6 +455,8 @@ func streamSearch(reader *buildkitelogs.ParquetReader, config *QueryConfig, star
 		BeforeContext: config.BeforeContext,
 		AfterContext:  config.AfterContext,
 		Context:       config.Context,
+		Reverse:       config.Reverse,
+		SeekStart:     config.SearchSeek,
 	}
 
 	var results []buildkitelogs.SearchResult

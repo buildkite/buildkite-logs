@@ -425,3 +425,185 @@ func indexOf(s, substr string) int {
 	}
 	return -1
 }
+
+func TestReverseSearch(t *testing.T) {
+	// Create a temporary parquet file with test data
+	testFile := "test_reverse_search.parquet"
+	defer os.Remove(testFile)
+
+	// Test entries with known patterns
+	baseTime := time.Date(2025, 4, 22, 21, 43, 29, 0, time.UTC).UnixMilli()
+	testEntries := []ParquetLogEntry{
+		{Timestamp: baseTime, Content: "setup phase started", Group: "setup", Flags: 0},
+		{Timestamp: baseTime + 100, Content: "installing dependencies", Group: "setup", Flags: 0},
+		{Timestamp: baseTime + 200, Content: "test phase started", Group: "test", Flags: 0},
+		{Timestamp: baseTime + 300, Content: "running unit tests", Group: "test", Flags: 0},
+		{Timestamp: baseTime + 400, Content: "test failed: assertion error", Group: "test", Flags: 0},
+		{Timestamp: baseTime + 500, Content: "cleanup phase started", Group: "cleanup", Flags: 0},
+		{Timestamp: baseTime + 600, Content: "removing temp files", Group: "cleanup", Flags: 0},
+		{Timestamp: baseTime + 700, Content: "build finished", Group: "cleanup", Flags: 0},
+	}
+
+	// Write test data to parquet file
+	if err := writeTestParquetFile(testFile, testEntries); err != nil {
+		t.Fatalf("Failed to create test parquet file: %v", err)
+	}
+
+	reader := NewParquetReader(testFile)
+
+	t.Run("ForwardSearch", func(t *testing.T) {
+		options := SearchOptions{
+			Pattern: "test.*",
+			Reverse: false,
+		}
+
+		results := []SearchResult{}
+		for result, err := range reader.SearchEntriesIter(options) {
+			if err != nil {
+				t.Fatalf("Search failed: %v", err)
+			}
+			results = append(results, result)
+		}
+
+		// Debug output
+		t.Logf("Forward search found %d results:", len(results))
+		for i, result := range results {
+			t.Logf("  Result %d: Line %d: %s", i, result.LineNumber, result.Match.Content)
+		}
+
+		if len(results) != 3 {
+			t.Errorf("Expected 3 matches in forward search, got %d", len(results))
+		}
+
+		// Expected matches: "test phase started", "running unit tests", "test failed"
+		if len(results) > 0 && results[0].LineNumber != 2 {
+			t.Errorf("Expected first match at line 2, got %d", results[0].LineNumber)
+		}
+	})
+
+	t.Run("ReverseSearch", func(t *testing.T) {
+		options := SearchOptions{
+			Pattern: "test.*",
+			Reverse: true,
+		}
+
+		results := []SearchResult{}
+		for result, err := range reader.SearchEntriesIter(options) {
+			if err != nil {
+				t.Fatalf("Reverse search failed: %v", err)
+			}
+			results = append(results, result)
+		}
+
+		// Debug output
+		t.Logf("Reverse search found %d results:", len(results))
+		for i, result := range results {
+			t.Logf("  Result %d: Line %d: %s", i, result.LineNumber, result.Match.Content)
+		}
+
+		if len(results) != 3 {
+			t.Errorf("Expected 3 matches in reverse search, got %d", len(results))
+		}
+
+		// In reverse search, first result should be "test failed" (line 4)
+		if len(results) > 0 && results[0].LineNumber != 4 {
+			t.Errorf("Expected first reverse match at line 4, got %d", results[0].LineNumber)
+		}
+	})
+
+	t.Run("ReverseSearchWithSeek", func(t *testing.T) {
+		options := SearchOptions{
+			Pattern:   "test.*",
+			Reverse:   true,
+			SeekStart: 3, // Start from line 3 and search backwards
+		}
+
+		results := []SearchResult{}
+		for result, err := range reader.SearchEntriesIter(options) {
+			if err != nil {
+				t.Fatalf("Reverse search with seek failed: %v", err)
+			}
+			results = append(results, result)
+		}
+
+		// Debug output
+		t.Logf("Reverse search with seek found %d results:", len(results))
+		for i, result := range results {
+			t.Logf("  Result %d: Line %d: %s", i, result.LineNumber, result.Match.Content)
+		}
+
+		if len(results) != 2 {
+			t.Errorf("Expected 2 matches in reverse search with seek, got %d", len(results))
+		}
+
+		// Should find both "running unit tests" (line 3) and "test phase started" (line 2)
+		// when starting from line 3 and searching backwards
+		if len(results) > 0 && results[0].LineNumber != 3 {
+			t.Errorf("Expected first reverse seek match at line 3, got %d", results[0].LineNumber)
+		}
+		if len(results) > 1 && results[1].LineNumber != 2 {
+			t.Errorf("Expected second reverse seek match at line 2, got %d", results[1].LineNumber)
+		}
+	})
+
+	t.Run("ReverseSearchWithContext", func(t *testing.T) {
+		options := SearchOptions{
+			Pattern:       "test failed",
+			Reverse:       true,
+			BeforeContext: 1,
+			AfterContext:  1,
+		}
+
+		results := []SearchResult{}
+		for result, err := range reader.SearchEntriesIter(options) {
+			if err != nil {
+				t.Fatalf("Reverse search with context failed: %v", err)
+			}
+			results = append(results, result)
+		}
+
+		if len(results) != 1 {
+			t.Errorf("Expected 1 match in reverse search with context, got %d", len(results))
+		}
+
+		result := results[0]
+		if result.LineNumber != 4 {
+			t.Errorf("Expected match at line 4, got %d", result.LineNumber)
+		}
+
+		// Check context: in reverse search, "before" context comes from higher indices
+		if len(result.BeforeContext) != 1 {
+			t.Errorf("Expected 1 before context line, got %d", len(result.BeforeContext))
+		}
+
+		// Check context: in reverse search, "after" context comes from lower indices
+		if len(result.AfterContext) != 1 {
+			t.Errorf("Expected 1 after context line, got %d", len(result.AfterContext))
+		}
+	})
+}
+
+// writeTestParquetFile creates a parquet file with test data
+func writeTestParquetFile(filename string, entries []ParquetLogEntry) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := NewParquetWriter(file)
+	defer writer.Close()
+
+	// Convert ParquetLogEntry to LogEntry format for writing
+	logEntries := make([]*LogEntry, len(entries))
+	for i, entry := range entries {
+		logEntries[i] = &LogEntry{
+			Timestamp: time.Unix(0, entry.Timestamp*int64(time.Millisecond)),
+			Content:   entry.Content,
+			RawLine:   []byte(entry.Content),
+			Group:     entry.Group,
+		}
+	}
+
+	return writer.WriteBatch(logEntries)
+}

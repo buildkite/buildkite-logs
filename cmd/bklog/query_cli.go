@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -308,7 +309,10 @@ func resolveParquetFilePath(config *QueryConfig) (string, error) {
 			return "", fmt.Errorf("BUILDKITE_API_TOKEN environment variable is required for API access")
 		}
 
-		cacheFilePath, err := buildkitelogs.DownloadAndCache(apiToken, config.Organization, config.Pipeline, config.Build, config.Job, version, config.CacheURL, config.CacheTTL, config.ForceRefresh)
+		client := buildkitelogs.NewBuildkiteAPIClient(apiToken, version)
+		ctx := context.Background()
+
+		cacheFilePath, err := buildkitelogs.DownloadAndCacheBlobStorage(ctx, client, config.Organization, config.Pipeline, config.Build, config.Job, config.CacheURL, config.CacheTTL, config.ForceRefresh)
 		if err != nil {
 			return "", fmt.Errorf("failed to download and cache logs: %w", err)
 		}

@@ -12,11 +12,26 @@ import (
 	"github.com/buildkite/go-buildkite/v4"
 )
 
+// JobStatusProvider defines the interface for getting job status
+type JobStatusProvider interface {
+	GetJobStatus(org, pipeline, build, job string) (*JobStatus, error)
+}
+
+// LogProvider defines the interface for getting job logs
+type LogProvider interface {
+	GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error)
+}
+
+// BuildkiteAPI combines both job status and log providers
+type BuildkiteAPI interface {
+	JobStatusProvider
+	LogProvider
+}
+
 // BuildkiteAPIClient provides methods to interact with the Buildkite API
 // Now wraps the official go-buildkite v4 client
 type BuildkiteAPIClient struct {
-	client    *buildkite.Client
-	userAgent string
+	client *buildkite.Client
 }
 
 // NewBuildkiteAPIClient creates a new Buildkite API client using go-buildkite v4
@@ -34,8 +49,14 @@ func NewBuildkiteAPIClient(apiToken, version string) *BuildkiteAPIClient {
 	)
 
 	return &BuildkiteAPIClient{
-		client:    client,
-		userAgent: userAgent,
+		client: client,
+	}
+}
+
+// NewBuildkiteAPI creates a new Buildkite API client using the provided go-buildkite client
+func NewBuildkiteAPIExistingClient(client *buildkite.Client) *BuildkiteAPIClient {
+	return &BuildkiteAPIClient{
+		client: client,
 	}
 }
 

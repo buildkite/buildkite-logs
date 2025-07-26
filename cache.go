@@ -58,7 +58,7 @@ func IsCacheFileExists(org, pipeline, build, job string) (bool, string, error) {
 }
 
 // DownloadAndCacheBlobStorage downloads logs using blob storage backend
-func DownloadAndCacheBlobStorage(ctx context.Context, apiToken, org, pipeline, build, job, version, storageURL string, ttl time.Duration, forceRefresh bool) (string, error) {
+func DownloadAndCacheBlobStorage(ctx context.Context, client BuildkiteAPI, org, pipeline, build, job, storageURL string, ttl time.Duration, forceRefresh bool) (string, error) {
 	if ttl == 0 {
 		ttl = 30 * time.Second // Default TTL from PRD
 	}
@@ -70,7 +70,6 @@ func DownloadAndCacheBlobStorage(ctx context.Context, apiToken, org, pipeline, b
 	}
 	defer blobStorage.Close()
 
-	client := NewBuildkiteAPIClient(apiToken, version)
 	blobKey := GenerateBlobKey(org, pipeline, build, job)
 
 	// Check if blob already exists
@@ -185,20 +184,4 @@ func createLocalCacheFile(ctx context.Context, blobStorage *BlobStorage, blobKey
 	}
 
 	return cacheFilePath, nil
-}
-
-// DownloadAndCache downloads logs from the Buildkite API with smart caching based on job status
-// ttl: time-to-live for non-terminal jobs (default: 30 seconds)
-// forceRefresh: bypass cache and force download
-// storageURL: blob storage URL (empty string uses default)
-func DownloadAndCache(apiToken, org, pipeline, build, job, version, storageURL string, ttl time.Duration, forceRefresh bool) (string, error) {
-	// Use blob storage backend
-	ctx := context.Background()
-	return DownloadAndCacheBlobStorage(ctx, apiToken, org, pipeline, build, job, version, storageURL, ttl, forceRefresh)
-}
-
-// Deprecated: Use DownloadAndCache with TTL and storage URL parameters instead
-// DownloadAndCacheLegacy maintains backward compatibility
-func DownloadAndCacheLegacy(apiToken, org, pipeline, build, job, version string) (string, error) {
-	return DownloadAndCache(apiToken, org, pipeline, build, job, version, "", 30*time.Second, false)
 }

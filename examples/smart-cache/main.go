@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -49,9 +50,13 @@ func main() {
 	fmt.Println("- Permanent cache for terminal jobs")
 	fmt.Println("- Auto storage backend selection")
 
+	client := buildkitelogs.NewBuildkiteAPIClient(apiToken, *version)
+	ctx := context.Background()
+
 	start := time.Now()
-	cacheFile1, err := buildkitelogs.DownloadAndCache(
-		apiToken, *org, *pipeline, *build, *job, *version,
+	cacheFile1, err := buildkitelogs.DownloadAndCacheBlobStorage(
+		ctx, client,
+		*org, *pipeline, *build, *job,
 		"",             // empty storageURL = auto-detect (file://~/.bklog or file:///tmp/bklog)
 		30*time.Second, // TTL for non-terminal jobs
 		false,          // don't force refresh
@@ -65,8 +70,9 @@ func main() {
 	// Example 2: Immediate second call (should use cache)
 	fmt.Println("\n⚡ Example 2: Immediate second call (cache hit)")
 	start = time.Now()
-	cacheFile2, err := buildkitelogs.DownloadAndCache(
-		apiToken, *org, *pipeline, *build, *job, *version,
+	cacheFile2, err := buildkitelogs.DownloadAndCacheBlobStorage(
+		ctx, client,
+		*org, *pipeline, *build, *job,
 		"", 30*time.Second, false,
 	)
 	if err != nil {
@@ -79,8 +85,9 @@ func main() {
 	// Example 3: Force refresh
 	fmt.Println("\n🔄 Example 3: Force refresh (bypass cache)")
 	start = time.Now()
-	cacheFile3, err := buildkitelogs.DownloadAndCache(
-		apiToken, *org, *pipeline, *build, *job, *version,
+	cacheFile3, err := buildkitelogs.DownloadAndCacheBlobStorage(
+		ctx, client,
+		*org, *pipeline, *build, *job,
 		"", 30*time.Second, true, // force refresh = true
 	)
 	if err != nil {
@@ -103,8 +110,9 @@ func main() {
 	fmt.Printf("Storage URL for this example: %s\n", s3URL)
 
 	start = time.Now()
-	cacheFile4, err := buildkitelogs.DownloadAndCache(
-		apiToken, *org, *pipeline, *build, *job, *version,
+	cacheFile4, err := buildkitelogs.DownloadAndCacheBlobStorage(
+		ctx, client,
+		*org, *pipeline, *build, *job,
 		s3URL,          // custom S3 storage
 		60*time.Second, // longer TTL
 		false,
@@ -114,8 +122,9 @@ func main() {
 		fmt.Println("   → Falling back to local storage for demo")
 
 		// Fallback to local storage
-		cacheFile4, err = buildkitelogs.DownloadAndCache(
-			apiToken, *org, *pipeline, *build, *job, *version,
+		cacheFile4, err = buildkitelogs.DownloadAndCacheBlobStorage(
+			ctx, client,
+			*org, *pipeline, *build, *job,
 			"file://./cache-demo", // local demo cache
 			60*time.Second,
 			false,
@@ -147,8 +156,9 @@ func main() {
 		fmt.Printf("  %d. TTL: %s\n", i+1, ttlDesc)
 
 		start = time.Now()
-		cacheFile, err := buildkitelogs.DownloadAndCache(
-			apiToken, *org, *pipeline, *build, *job, *version,
+		cacheFile, err := buildkitelogs.DownloadAndCacheBlobStorage(
+			ctx, client,
+			*org, *pipeline, *build, *job,
 			fmt.Sprintf("file://./cache-ttl-%d", i), // separate cache per TTL
 			ttl,
 			false,

@@ -1,8 +1,6 @@
 package buildkitelogs
 
 import (
-	"fmt"
-	"runtime"
 	"testing"
 )
 
@@ -98,22 +96,6 @@ func TestValidateAPIParams(t *testing.T) {
 	}
 }
 
-func TestNewBuildkiteAPIClient(t *testing.T) {
-	token := "test-token"
-	version := "v1.2.3"
-	client := NewBuildkiteAPIClient(token, version)
-
-	// Test that client and userAgent are set
-	if client.client == nil {
-		t.Error("Expected go-buildkite client to be initialized")
-	}
-
-	expectedUserAgent := fmt.Sprintf("buildkite-logs-parquet/v1.2.3 (Go; %s; %s)", runtime.GOOS, runtime.GOARCH)
-	if client.userAgent != expectedUserAgent {
-		t.Errorf("Expected User-Agent %q, got %q", expectedUserAgent, client.userAgent)
-	}
-}
-
 func TestGetJobLog_NoToken(t *testing.T) {
 	client := NewBuildkiteAPIClient("", "test")
 
@@ -126,15 +108,5 @@ func TestGetJobLog_NoToken(t *testing.T) {
 	// We just check that an error occurred
 	if err == nil {
 		t.Error("Expected an error when API token is empty")
-	}
-}
-
-func TestUserAgentCreation(t *testing.T) {
-	// Test that the user agent is created correctly
-	client := NewBuildkiteAPIClient("test-token", "v1.2.3")
-
-	expectedUserAgent := fmt.Sprintf("buildkite-logs-parquet/v1.2.3 (Go; %s; %s)", runtime.GOOS, runtime.GOARCH)
-	if client.userAgent != expectedUserAgent {
-		t.Errorf("Expected User-Agent %q, got %q", expectedUserAgent, client.userAgent)
 	}
 }

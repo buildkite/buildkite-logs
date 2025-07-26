@@ -82,7 +82,8 @@ func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error
 func GetDefaultStorageURL() string {
 	// Check if we're in a containerized environment (Docker/Kubernetes)
 	if IsContainerizedEnvironment() {
-		return "file:///tmp/bklog"
+		tempDir := os.TempDir()
+		return fmt.Sprintf("file://%s/bklog", tempDir)
 	}
 
 	// Default to user's home directory for desktop usage

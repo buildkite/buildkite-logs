@@ -747,6 +747,57 @@ The `flags` column uses bitwise operations to efficiently store multiple boolean
 ```
 This uses the modern `iter.Seq2[*LogEntry, error]` iterator pattern for memory-efficient processing.
 
+## High-Level Client API
+
+For common use cases, the library provides a high-level `ParquetClient` API that simplifies downloading, caching, and querying Buildkite logs:
+
+```go
+package main
+
+import (
+    "context"
+    "time"
+    
+    "github.com/buildkite/go-buildkite/v4"
+    buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
+)
+
+func main() {
+    // Create buildkite client
+    client, _ := buildkite.NewOpts(buildkite.WithTokenAuth("your-token"))
+    
+    // Create high-level ParquetClient
+    parquetClient := buildkitelogs.NewParquetClient(client, "file://~/.bklog")
+    
+    ctx := context.Background()
+    
+    // Download, cache, and get a reader in one step
+    reader, err := parquetClient.NewReader(
+        ctx, "myorg", "mypipeline", "123", "job-id",
+        time.Minute*5, false, // TTL and force refresh
+    )
+    if err != nil {
+        panic(err)
+    }
+    
+    // Query the logs
+    for entry, err := range reader.ReadEntriesIter() {
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println(entry.Content)
+    }
+}
+```
+
+The `ParquetClient` provides:
+- **Simplified API**: Easy-to-use methods for common operations
+- **Automatic caching**: Intelligent caching with TTL support
+- **Multiple backends**: Support for both official `*buildkite.Client` and custom `BuildkiteAPI` implementations
+- **Parameter validation**: Built-in validation with descriptive error messages
+
+For detailed documentation, see [docs/client-api.md](docs/client-api.md). For a complete working example, see [examples/high-level-client/](examples/high-level-client/).
+
 ## API Reference
 
 ### Types

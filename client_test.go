@@ -29,7 +29,11 @@ func TestParquetClient_NewParquetClient(t *testing.T) {
 	client, _ := buildkite.NewOpts()
 	storageURL := "file://./test-cache"
 
-	parquetClient := NewParquetClient(client, storageURL)
+	parquetClient, err := NewClient(client, storageURL)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer parquetClient.Close()
 
 	if parquetClient == nil {
 		t.Fatal("Expected ParquetClient to be created, got nil")
@@ -51,10 +55,14 @@ func TestParquetClient_NewParquetClientWithAPI(t *testing.T) {
 	}
 	storageURL := "file://./test-cache"
 
-	parquetClient := NewParquetClientWithAPI(mockAPI, storageURL)
+	parquetClient, err := NewClientWithAPI(mockAPI, storageURL)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer parquetClient.Close()
 
 	if parquetClient == nil {
-		t.Fatal("Expected ParquetClient to be created, got nil")
+		t.Fatal("Expected Client to be created, got nil")
 	}
 
 	if parquetClient.api != mockAPI {
@@ -76,11 +84,15 @@ func TestParquetClient_DownloadAndCache(t *testing.T) {
 		},
 	}
 
-	client := NewParquetClientWithAPI(mockAPI, "file://./test-cache")
+	client, err := NewClientWithAPI(mockAPI, "file://./test-cache")
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
 	ctx := context.Background()
 
 	// Test parameter validation
-	_, err := client.DownloadAndCache(ctx, "", "pipeline", "build", "job", time.Minute, false)
+	_, err = client.DownloadAndCache(ctx, "", "pipeline", "build", "job", time.Minute, false)
 	if err == nil {
 		t.Error("Expected error for missing organization parameter")
 	}
@@ -99,11 +111,15 @@ func TestParquetClient_NewReader(t *testing.T) {
 		},
 	}
 
-	client := NewParquetClientWithAPI(mockAPI, "file://./test-cache")
+	client, err := NewClientWithAPI(mockAPI, "file://./test-cache")
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
 	ctx := context.Background()
 
 	// Test parameter validation
-	_, err := client.NewReader(ctx, "", "pipeline", "build", "job", time.Minute, false)
+	_, err = client.NewReader(ctx, "", "pipeline", "build", "job", time.Minute, false)
 	if err == nil {
 		t.Error("Expected error for missing organization parameter")
 	}

@@ -25,9 +25,45 @@ func main() {
 		log.Fatal("Failed to create buildkite client:", err)
 	}
 
-	// Create high-level ParquetClient
+	// Create high-level Client
 	storageURL := "file://~/.bklog" // Uses default storage location
-	parquetClient := buildkitelogs.NewParquetClient(client, storageURL)
+	buildkiteLogsClient, err := buildkitelogs.NewClient(client, storageURL)
+	if err != nil {
+		log.Fatal("Failed to create buildkite logs client:", err)
+	}
+	defer buildkiteLogsClient.Close()
+
+	// Setup hooks for observability
+	buildkiteLogsClient.Hooks().AddAfterCacheCheck(func(ctx context.Context, result *buildkitelogs.CacheCheckResult) {
+		log.Printf("🔍 Cache check for %s: exists=%t, took %v", result.BlobKey, result.Exists, result.Duration)
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterJobStatus(func(ctx context.Context, result *buildkitelogs.JobStatusResult) {
+		if result.Error != nil {
+			log.Printf("❌ Job status fetch failed in %v: %v", result.Duration, result.Error)
+		} else {
+			log.Printf("✅ Job status: %s (terminal: %t) - took %v",
+				result.JobStatus.State, result.JobStatus.IsTerminal, result.Duration)
+		}
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterLogDownload(func(ctx context.Context, result *buildkitelogs.LogDownloadResult) {
+		log.Printf("⬇️  Downloaded %d bytes in %v", result.LogSize, result.Duration)
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterLogParsing(func(ctx context.Context, result *buildkitelogs.LogParsingResult) {
+		log.Printf("🔄 Parsed logs to %d bytes Parquet in %v", result.ParquetSize, result.Duration)
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterBlobStorage(func(ctx context.Context, result *buildkitelogs.BlobStorageResult) {
+		log.Printf("💾 Stored %d bytes to blob storage (terminal: %t) in %v",
+			result.DataSize, result.IsTerminal, result.Duration)
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterLocalCache(func(ctx context.Context, result *buildkitelogs.LocalCacheResult) {
+		log.Printf("📁 Created local cache file %s (%d bytes) in %v",
+			result.LocalPath, result.FileSize, result.Duration)
+	})
 
 	ctx := context.Background()
 	org := "myorg"
@@ -37,23 +73,26 @@ func main() {
 
 	// Example 1: Just download and cache logs
 	fmt.Println("Downloading and caching logs...")
-	filePath, err := parquetClient.DownloadAndCache(ctx, org, pipeline, build, job, time.Minute*5, false)
+	filePath, err := buildkiteLogsClient.DownloadAndCache(ctx, org, pipeline, build, job, time.Minute*5, false)
 	if err != nil {
-		log.Fatal("Failed to download and cache:", err)
+		log.Printf("Failed to download and cache: %v", err)
+		return
 	}
 	fmt.Printf("Cached to: %s\n", filePath)
 
 	// Example 2: Get a reader and query the logs
 	fmt.Println("Creating reader and querying logs...")
-	reader, err := parquetClient.NewReader(ctx, org, pipeline, build, job, time.Minute*5, false)
+	reader, err := buildkiteLogsClient.NewReader(ctx, org, pipeline, build, job, time.Minute*5, false)
 	if err != nil {
-		log.Fatal("Failed to create reader:", err)
+		log.Printf("Failed to create reader: %v", err)
+		return
 	}
 
 	// Get file info
 	info, err := reader.GetFileInfo()
 	if err != nil {
-		log.Fatal("Failed to get file info:", err)
+		log.Printf("Failed to get file info: %v", err)
+		return
 	}
 	fmt.Printf("Log file contains %d rows\n", info.RowCount)
 
@@ -61,7 +100,8 @@ func main() {
 	count := 0
 	for entry, err := range reader.ReadEntriesIter() {
 		if err != nil {
-			log.Fatal("Error reading entries:", err)
+			log.Printf("Error reading entries: %v", err)
+			return
 		}
 
 		fmt.Printf("Entry %d: %s\n", count+1, entry.Content)
@@ -74,11 +114,17 @@ func main() {
 	// Example 3: Using with custom API implementation
 	fmt.Println("\nExample with custom API:")
 	customAPI := &CustomBuildkiteAPI{} // Your custom implementation
-	customClient := buildkitelogs.NewParquetClientWithAPI(customAPI, storageURL)
+	customClient, err := buildkitelogs.NewClientWithAPI(customAPI, storageURL)
+	if err != nil {
+		log.Printf("Failed to create custom client: %v", err)
+		return
+	}
+	defer customClient.Close()
 
 	reader2, err := customClient.NewReader(ctx, org, pipeline, build, job, time.Minute*5, false)
 	if err != nil {
-		log.Fatal("Failed to create reader with custom API:", err)
+		log.Printf("Failed to create reader with custom API: %v", err)
+		return
 	}
 
 	// Search for specific patterns
@@ -91,7 +137,8 @@ func main() {
 	fmt.Println("Searching for 'error' in logs:")
 	for result, err := range reader2.SearchEntriesIter(searchOpts) {
 		if err != nil {
-			log.Fatal("Error searching:", err)
+			log.Printf("Error searching: %v", err)
+			return
 		}
 		fmt.Printf("Found error at row %d: %s\n", result.LineNumber, result.Match.Content)
 		break // Just show first result

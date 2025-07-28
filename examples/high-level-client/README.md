@@ -1,15 +1,16 @@
 # High-Level Client API Example
 
-This example demonstrates how to use the high-level `ParquetClient` API for downloading, caching, and querying Buildkite logs.
+This example demonstrates how to use the high-level `Client` API for downloading, caching, and querying Buildkite logs.
 
 ## Overview
 
-The `ParquetClient` provides a simplified interface for common operations:
+The `Client` provides a simplified interface for common operations:
 
 - Download and cache job logs from Buildkite API
 - Automatic conversion to Parquet format for efficient querying
 - Support for both official `*buildkite.Client` and custom `BuildkiteAPI` implementations
 - Built-in caching with TTL and force refresh options
+- Optional hooks system for observability and tracing
 
 ## Prerequisites
 
@@ -27,11 +28,11 @@ go run main.go
 
 ## What the Example Does
 
-The example demonstrates three main use cases:
+The example demonstrates three main use cases plus hooks for observability:
 
 ### 1. Basic Usage with Official Client
 
-Creates a `ParquetClient` using the official `*buildkite.Client` and shows how to:
+Creates a `Client` using the official `*buildkite.Client` and shows how to:
 - Download and cache logs to a local file
 - Create a reader for querying the cached data
 - Read basic file information (row count, file size, etc.)
@@ -50,6 +51,18 @@ Demonstrates how to use a custom `BuildkiteAPI` implementation instead of the of
 - Testing with mock data
 - Custom authentication or rate limiting
 - Integrating with other log sources
+
+### 4. Observability Hooks
+
+Shows how to set up hooks for detailed observability of the download and caching process:
+- Cache check timing and results
+- Job status API call timing  
+- Log download progress
+- Parquet conversion performance
+- Blob storage operations
+- Local cache file creation
+
+The example uses hooks to provide real-time feedback with emojis and timing information, making it easy to see what's happening at each stage.
 
 ## Configuration
 
@@ -70,11 +83,11 @@ The example uses `file://~/.bklog` as the storage URL, but you can use other bac
 
 ## Key Functions
 
-### `NewParquetClient(client, storageURL)`
+### `NewClient(client, storageURL)`
 
 Creates a client using the official go-buildkite client.
 
-### `NewParquetClientWithAPI(api, storageURL)`
+### `NewClientWithAPI(api, storageURL)`
 
 Creates a client using a custom API implementation.
 

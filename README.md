@@ -749,7 +749,7 @@ This uses the modern `iter.Seq2[*LogEntry, error]` iterator pattern for memory-e
 
 ## High-Level Client API
 
-For common use cases, the library provides a high-level `ParquetClient` API that simplifies downloading, caching, and querying Buildkite logs:
+For common use cases, the library provides a high-level `Client` API that simplifies downloading, caching, and querying Buildkite logs:
 
 ```go
 package main
@@ -766,13 +766,17 @@ func main() {
     // Create buildkite client
     client, _ := buildkite.NewOpts(buildkite.WithTokenAuth("your-token"))
     
-    // Create high-level ParquetClient
-    parquetClient := buildkitelogs.NewParquetClient(client, "file://~/.bklog")
+    // Create high-level Client
+    buildkiteLogsClient, err := buildkitelogs.NewClient(client, "file://~/.bklog")
+    if err != nil {
+        panic(err)
+    }
+    defer buildkiteLogsClient.Close()
     
     ctx := context.Background()
     
     // Download, cache, and get a reader in one step
-    reader, err := parquetClient.NewReader(
+    reader, err := buildkiteLogsClient.NewReader(
         ctx, "myorg", "mypipeline", "123", "job-id",
         time.Minute*5, false, // TTL and force refresh
     )
@@ -790,11 +794,46 @@ func main() {
 }
 ```
 
-The `ParquetClient` provides:
+The `Client` provides:
 - **Simplified API**: Easy-to-use methods for common operations
 - **Automatic caching**: Intelligent caching with TTL support
 - **Multiple backends**: Support for both official `*buildkite.Client` and custom `BuildkiteAPI` implementations
 - **Parameter validation**: Built-in validation with descriptive error messages
+- **Hooks System**: Optional hooks for observability and tracing without coupling to specific frameworks
+
+### Hooks for Observability
+
+The client supports optional hooks that are invoked after each stage of the download and cache process, providing timing and context data for tracing or logging:
+
+```go
+// Add hooks for observability
+client.Hooks().AddAfterCacheCheck(func(ctx context.Context, result *buildkitelogs.CacheCheckResult) {
+    log.Printf("Cache check for %s: exists=%t, took %v", result.BlobKey, result.Exists, result.Duration)
+})
+
+client.Hooks().AddAfterLogDownload(func(ctx context.Context, result *buildkitelogs.LogDownloadResult) {
+    log.Printf("Downloaded %d bytes in %v", result.LogSize, result.Duration)
+})
+
+client.Hooks().AddAfterLogParsing(func(ctx context.Context, result *buildkitelogs.LogParsingResult) {
+    log.Printf("Parsed logs to %d bytes Parquet in %v", result.ParquetSize, result.Duration)
+})
+
+client.Hooks().AddAfterBlobStorage(func(ctx context.Context, result *buildkitelogs.BlobStorageResult) {
+    log.Printf("Stored %d bytes to blob storage (terminal: %t) in %v", 
+        result.DataSize, result.IsTerminal, result.Duration)
+})
+```
+
+Available hook types:
+- `OnAfterCacheCheck` - Blob storage cache existence check
+- `OnAfterJobStatus` - Buildkite job status API call  
+- `OnAfterLogDownload` - Log download from Buildkite API
+- `OnAfterLogParsing` - Log parsing and Parquet conversion
+- `OnAfterBlobStorage` - Data storage in blob backend
+- `OnAfterLocalCache` - Local cache file creation
+
+Each hook receives detailed timing and context information, making it easy to add distributed tracing, metrics, or custom logging without modifying the core library.
 
 For detailed documentation, see [docs/client-api.md](docs/client-api.md). For a complete working example, see [examples/high-level-client/](examples/high-level-client/).
 

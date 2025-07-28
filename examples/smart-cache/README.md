@@ -1,9 +1,10 @@
 # Smart Cache Example
 
-This example demonstrates Phase 3 smart caching features with TTL and metadata management.
+This example demonstrates smart caching features using the high-level `Client` API with TTL and metadata management.
 
 ## Features Demonstrated
 
+- **High-level Client API** for simplified caching operations
 - **30-second TTL** for non-terminal jobs with automatic refresh
 - **Permanent caching** for terminal jobs (finished/failed/canceled) 
 - **Force refresh** capability bypassing cache
@@ -58,4 +59,4 @@ go run main.go \
 5. **Different TTL values** and their effects
 6. **Job status-aware caching** behavior
 
-The example shows how terminal jobs are cached permanently while non-terminal jobs refresh based on TTL, with metadata stored in blob attributes.
+The example shows how the high-level `Client` API handles terminal jobs by caching them permanently while non-terminal jobs refresh based on TTL, with metadata stored in blob attributes. Each example creates separate clients with different storage URLs to demonstrate various caching scenarios.

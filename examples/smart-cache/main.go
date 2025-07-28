@@ -44,20 +44,25 @@ func main() {
 	fmt.Println("🚀 Buildkite Smart Caching Example")
 	fmt.Println(strings.Repeat("=", 50))
 
-	// Example 1: Default smart caching (30s TTL, auto storage)
-	fmt.Println("\n📦 Example 1: Default smart caching")
+	// Example 1: Default smart caching using high-level Client (30s TTL, auto storage)
+	fmt.Println("\n📦 Example 1: Default smart caching with high-level Client")
 	fmt.Println("- 30-second TTL for non-terminal jobs")
 	fmt.Println("- Permanent cache for terminal jobs")
 	fmt.Println("- Auto storage backend selection")
 
-	client := buildkitelogs.NewBuildkiteAPIClient(apiToken, *version)
+	// Create high-level client
+	buildkiteAPIClient := buildkitelogs.NewBuildkiteAPIClient(apiToken, *version)
+	client, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, "") // empty storageURL = auto-detect
+	if err != nil {
+		log.Fatal("Failed to create client:", err)
+	}
+	defer client.Close()
 	ctx := context.Background()
 
 	start := time.Now()
-	cacheFile1, err := buildkitelogs.DownloadAndCacheBlobStorage(
-		ctx, client,
+	cacheFile1, err := client.DownloadAndCache(
+		ctx,
 		*org, *pipeline, *build, *job,
-		"",             // empty storageURL = auto-detect (file://~/.bklog or file:///tmp/bklog)
 		30*time.Second, // TTL for non-terminal jobs
 		false,          // don't force refresh
 	)
@@ -70,10 +75,10 @@ func main() {
 	// Example 2: Immediate second call (should use cache)
 	fmt.Println("\n⚡ Example 2: Immediate second call (cache hit)")
 	start = time.Now()
-	cacheFile2, err := buildkitelogs.DownloadAndCacheBlobStorage(
-		ctx, client,
+	cacheFile2, err := client.DownloadAndCache(
+		ctx,
 		*org, *pipeline, *build, *job,
-		"", 30*time.Second, false,
+		30*time.Second, false,
 	)
 	if err != nil {
 		log.Printf("Cache operation failed: %v", err)
@@ -85,10 +90,10 @@ func main() {
 	// Example 3: Force refresh
 	fmt.Println("\n🔄 Example 3: Force refresh (bypass cache)")
 	start = time.Now()
-	cacheFile3, err := buildkitelogs.DownloadAndCacheBlobStorage(
-		ctx, client,
+	cacheFile3, err := client.DownloadAndCache(
+		ctx,
 		*org, *pipeline, *build, *job,
-		"", 30*time.Second, true, // force refresh = true
+		30*time.Second, true, // force refresh = true
 	)
 	if err != nil {
 		log.Printf("Cache operation failed: %v", err)
@@ -109,28 +114,42 @@ func main() {
 	s3URL := "s3://my-buildkite-cache/logs"
 	fmt.Printf("Storage URL for this example: %s\n", s3URL)
 
-	start = time.Now()
-	cacheFile4, err := buildkitelogs.DownloadAndCacheBlobStorage(
-		ctx, client,
-		*org, *pipeline, *build, *job,
-		s3URL,          // custom S3 storage
-		60*time.Second, // longer TTL
-		false,
-	)
+	// Create client with custom storage URL
+	var cacheFile4 string
+	s3Client, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, s3URL)
+	if err != nil {
+		log.Printf("Failed to create S3 client: %v", err)
+		fmt.Println("   → Falling back to local storage for demo")
+	} else {
+		defer s3Client.Close()
+		start = time.Now()
+		cacheFile4, err = s3Client.DownloadAndCache(
+			ctx,
+			*org, *pipeline, *build, *job,
+			60*time.Second, // longer TTL
+			false,
+		)
+	}
+
 	if err != nil {
 		log.Printf("S3 cache failed (expected if no AWS creds): %v", err)
 		fmt.Println("   → Falling back to local storage for demo")
 
 		// Fallback to local storage
-		cacheFile4, err = buildkitelogs.DownloadAndCacheBlobStorage(
-			ctx, client,
-			*org, *pipeline, *build, *job,
-			"file://./cache-demo", // local demo cache
-			60*time.Second,
-			false,
-		)
+		localClient, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, "file://./cache-demo")
 		if err != nil {
-			log.Printf("Local cache fallback failed: %v", err)
+			log.Printf("Failed to create local client: %v", err)
+		} else {
+			defer localClient.Close()
+			cacheFile4, err = localClient.DownloadAndCache(
+				ctx,
+				*org, *pipeline, *build, *job,
+				60*time.Second,
+				false,
+			)
+			if err != nil {
+				log.Printf("Local cache fallback failed: %v", err)
+			}
 		}
 	}
 
@@ -155,11 +174,17 @@ func main() {
 
 		fmt.Printf("  %d. TTL: %s\n", i+1, ttlDesc)
 
+		// Create client with separate cache directory for each TTL
+		ttlClient, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, fmt.Sprintf("file://./cache-ttl-%d", i))
+		if err != nil {
+			log.Printf("     Failed to create TTL client: %v", err)
+			continue
+		}
+		defer ttlClient.Close()
 		start = time.Now()
-		cacheFile, err := buildkitelogs.DownloadAndCacheBlobStorage(
-			ctx, client,
+		cacheFile, err := ttlClient.DownloadAndCache(
+			ctx,
 			*org, *pipeline, *build, *job,
-			fmt.Sprintf("file://./cache-ttl-%d", i), // separate cache per TTL
 			ttl,
 			false,
 		)

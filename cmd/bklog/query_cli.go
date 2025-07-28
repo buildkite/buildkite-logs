@@ -55,7 +55,7 @@ func handleQueryCommand() {
 		fmt.Println("  -file <path>     Local parquet file")
 		fmt.Println("  OR API params:   -org -pipeline -build -job")
 		fmt.Println("\nFor API usage, set BUILDKITE_API_TOKEN environment variable.")
-		fmt.Println("API logs are automatically downloaded and cached in ~/.bklog/")
+		fmt.Println("API logs are automatically downloaded and cached using the high-level client.")
 		fmt.Println("Smart caching: Terminal jobs are cached permanently, non-terminal jobs use TTL.")
 		fmt.Println("\nOptions:")
 		queryFlags.PrintDefaults()
@@ -302,17 +302,23 @@ func resolveParquetFilePath(config *QueryConfig) (string, error) {
 		return config.ParquetFile, nil
 	}
 
-	// If API parameters are provided, download and cache
+	// If API parameters are provided, download and cache using high-level client
 	if config.Organization != "" && config.Pipeline != "" && config.Build != "" && config.Job != "" {
 		apiToken := os.Getenv("BUILDKITE_API_TOKEN")
 		if apiToken == "" {
 			return "", fmt.Errorf("BUILDKITE_API_TOKEN environment variable is required for API access")
 		}
 
-		client := buildkitelogs.NewBuildkiteAPIClient(apiToken, version)
+		// Create buildkite client and high-level client
+		buildkiteClient := buildkitelogs.NewBuildkiteAPIClient(apiToken, version)
+		client, err := buildkitelogs.NewClientWithAPI(buildkiteClient, config.CacheURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to create client: %w", err)
+		}
+		defer client.Close()
 		ctx := context.Background()
 
-		cacheFilePath, err := buildkitelogs.DownloadAndCacheBlobStorage(ctx, client, config.Organization, config.Pipeline, config.Build, config.Job, config.CacheURL, config.CacheTTL, config.ForceRefresh)
+		cacheFilePath, err := client.DownloadAndCache(ctx, config.Organization, config.Pipeline, config.Build, config.Job, config.CacheTTL, config.ForceRefresh)
 		if err != nil {
 			return "", fmt.Errorf("failed to download and cache logs: %w", err)
 		}

@@ -468,7 +468,7 @@ func TestReverseSearch(t *testing.T) {
 		// Debug output
 		t.Logf("Forward search found %d results:", len(results))
 		for i, result := range results {
-			t.Logf("  Result %d: Line %d: %s", i, result.LineNumber, result.Match.Content)
+			t.Logf("  Result %d: Row %d: %s", i, result.Match.RowNumber, result.Match.Content)
 		}
 
 		if len(results) != 3 {
@@ -476,8 +476,8 @@ func TestReverseSearch(t *testing.T) {
 		}
 
 		// Expected matches: "test phase started", "running unit tests", "test failed"
-		if len(results) > 0 && results[0].LineNumber != 2 {
-			t.Errorf("Expected first match at line 2, got %d", results[0].LineNumber)
+		if len(results) > 0 && results[0].Match.RowNumber != 2 {
+			t.Errorf("Expected first match at row 2, got %d", results[0].Match.RowNumber)
 		}
 	})
 
@@ -498,7 +498,7 @@ func TestReverseSearch(t *testing.T) {
 		// Debug output
 		t.Logf("Reverse search found %d results:", len(results))
 		for i, result := range results {
-			t.Logf("  Result %d: Line %d: %s", i, result.LineNumber, result.Match.Content)
+			t.Logf("  Result %d: Row %d: %s", i, result.Match.RowNumber, result.Match.Content)
 		}
 
 		if len(results) != 3 {
@@ -506,8 +506,8 @@ func TestReverseSearch(t *testing.T) {
 		}
 
 		// In reverse search, first result should be "test failed" (line 4)
-		if len(results) > 0 && results[0].LineNumber != 4 {
-			t.Errorf("Expected first reverse match at line 4, got %d", results[0].LineNumber)
+		if len(results) > 0 && results[0].Match.RowNumber != 4 {
+			t.Errorf("Expected first reverse match at row 4, got %d", results[0].Match.RowNumber)
 		}
 	})
 
@@ -529,7 +529,7 @@ func TestReverseSearch(t *testing.T) {
 		// Debug output
 		t.Logf("Reverse search with seek found %d results:", len(results))
 		for i, result := range results {
-			t.Logf("  Result %d: Line %d: %s", i, result.LineNumber, result.Match.Content)
+			t.Logf("  Result %d: Row %d: %s", i, result.Match.RowNumber, result.Match.Content)
 		}
 
 		if len(results) != 2 {
@@ -538,11 +538,11 @@ func TestReverseSearch(t *testing.T) {
 
 		// Should find both "running unit tests" (line 3) and "test phase started" (line 2)
 		// when starting from line 3 and searching backwards
-		if len(results) > 0 && results[0].LineNumber != 3 {
-			t.Errorf("Expected first reverse seek match at line 3, got %d", results[0].LineNumber)
+		if len(results) > 0 && results[0].Match.RowNumber != 3 {
+			t.Errorf("Expected first reverse seek match at row 3, got %d", results[0].Match.RowNumber)
 		}
-		if len(results) > 1 && results[1].LineNumber != 2 {
-			t.Errorf("Expected second reverse seek match at line 2, got %d", results[1].LineNumber)
+		if len(results) > 1 && results[1].Match.RowNumber != 2 {
+			t.Errorf("Expected second reverse seek match at row 2, got %d", results[1].Match.RowNumber)
 		}
 	})
 
@@ -567,8 +567,8 @@ func TestReverseSearch(t *testing.T) {
 		}
 
 		result := results[0]
-		if result.LineNumber != 4 {
-			t.Errorf("Expected match at line 4, got %d", result.LineNumber)
+		if result.Match.RowNumber != 4 {
+			t.Errorf("Expected match at row 4, got %d", result.Match.RowNumber)
 		}
 
 		// Check context: in reverse search, "before" context comes from higher indices

@@ -140,7 +140,7 @@ func main() {
 			log.Printf("Error searching: %v", err)
 			return
 		}
-		fmt.Printf("Found error at row %d: %s\n", result.LineNumber, result.Match.Content)
+		fmt.Printf("Found error at row %d: %s\n", result.Match.RowNumber, result.Match.Content)
 		break // Just show first result
 	}
 }

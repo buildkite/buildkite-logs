@@ -65,6 +65,7 @@ func (lf LogFlags) IsGroup() bool {
 
 // ParquetLogEntry represents a log entry read from a Parquet file
 type ParquetLogEntry struct {
+	RowNumber int64    `json:"row_number"` // 0-based row position in the Parquet file
 	Timestamp int64    `json:"timestamp"`
 	Content   string   `json:"content"`
 	Group     string   `json:"group"`
@@ -130,7 +131,6 @@ type SearchResult struct {
 	Match         ParquetLogEntry   `json:"match"`
 	BeforeContext []ParquetLogEntry `json:"before_context,omitempty"`
 	AfterContext  []ParquetLogEntry `json:"after_context,omitempty"`
-	LineNumber    int64             `json:"line_number"`
 }
 
 // QueryStats contains performance and result statistics for queries
@@ -253,6 +253,7 @@ func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[Pa
 
 		// Get schema from the first record peek or metadata
 		var columnIndices *columnMapping
+		currentRowPosition := int64(0) // Track current position from start of file
 
 		// Stream records in batches
 		for {
@@ -275,18 +276,21 @@ func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[Pa
 				}
 			}
 
-			// Process record batch with immediate cleanup
+			// Process record batch with immediate cleanup and row tracking
 			shouldContinue := func() bool {
 				defer record.Release()
 
-				// Convert record to entries using streaming iterator
-				for entry, err := range convertRecordToEntriesIterStreaming(record, columnIndices) {
+				// Convert record to entries using streaming iterator with current row position
+				for entry, err := range convertRecordToEntriesIterStreaming(record, columnIndices, currentRowPosition) {
 					if !yield(entry, err) {
 						return false
 					}
 				}
 				return true
 			}()
+
+			// Update current row position for next batch
+			currentRowPosition += int64(record.NumRows())
 
 			if !shouldContinue {
 				return
@@ -327,7 +331,7 @@ func mapColumns(schema *arrow.Schema) (*columnMapping, error) {
 }
 
 // convertRecordToEntriesIterStreaming converts an Arrow record to an iterator over ParquetLogEntry with column mapping
-func convertRecordToEntriesIterStreaming(record arrow.Record, mapping *columnMapping) iter.Seq2[ParquetLogEntry, error] {
+func convertRecordToEntriesIterStreaming(record arrow.Record, mapping *columnMapping, startRowNumber int64) iter.Seq2[ParquetLogEntry, error] {
 	return func(yield func(ParquetLogEntry, error) bool) {
 		numRows := int(record.NumRows())
 
@@ -345,7 +349,9 @@ func convertRecordToEntriesIterStreaming(record arrow.Record, mapping *columnMap
 
 		// Convert each row
 		for i := 0; i < numRows; i++ {
-			entry := ParquetLogEntry{}
+			entry := ParquetLogEntry{
+				RowNumber: startRowNumber + int64(i), // Set the absolute row position
+			}
 
 			// Timestamp (required)
 			if timestampCol.IsNull(i) {
@@ -530,6 +536,7 @@ func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[Parqu
 
 		// Get schema for column mapping
 		var columnIndices *columnMapping
+		currentRowPosition := startRow // Track current position in the file
 
 		// Stream records in batches starting from the seek position
 		for {
@@ -552,18 +559,21 @@ func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[Parqu
 				}
 			}
 
-			// Process all entries in this record batch (no manual offset needed)
+			// Process all entries in this record batch with row tracking
 			shouldContinue := func() bool {
 				defer record.Release()
 
-				// Convert record to entries using standard streaming iterator
-				for entry, err := range convertRecordToEntriesIterStreaming(record, columnIndices) {
+				// Convert record to entries using streaming iterator with current row position
+				for entry, err := range convertRecordToEntriesIterStreaming(record, columnIndices, currentRowPosition) {
 					if !yield(entry, err) {
 						return false
 					}
 				}
 				return true
 			}()
+
+			// Update current row position for next batch
+			currentRowPosition += int64(record.NumRows())
 
 			if !shouldContinue {
 				return
@@ -650,7 +660,6 @@ func searchForwardParquetFileIter(filename string, options SearchOptions, regex 
 				Match:         entry,
 				BeforeContext: make([]ParquetLogEntry, len(beforeBuffer)),
 				AfterContext:  make([]ParquetLogEntry, 0, afterContext),
-				LineNumber:    totalEntries - 1,
 			}
 			copy(result.BeforeContext, beforeBuffer)
 
@@ -720,8 +729,7 @@ func searchReverseParquetFileIter(filename string, options SearchOptions, regex 
 
 		if isMatch {
 			result := SearchResult{
-				Match:      entry,
-				LineNumber: int64(i),
+				Match: entry,
 			}
 
 			// Collect before context (entries that come before in reverse = higher indices)

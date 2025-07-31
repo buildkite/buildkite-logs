@@ -153,7 +153,6 @@ func BenchmarkIteratorWithFiltering(b *testing.B) {
 		name string
 		fn   func(*LogEntry) bool
 	}{
-		{"commands", func(e *LogEntry) bool { return e.IsCommand() }},
 		{"sections", func(e *LogEntry) bool { return e.IsSection() }},
 	}
 
@@ -264,7 +263,6 @@ func BenchmarkSeq2WithFiltering(b *testing.B) {
 		name string
 		fn   func(*LogEntry) bool
 	}{
-		{"commands", func(e *LogEntry) bool { return e.IsCommand() }},
 		{"groups", func(e *LogEntry) bool { return e.IsGroup() }},
 	}
 
@@ -360,7 +358,7 @@ func BenchmarkParquetWithFiltering(b *testing.B) {
 	parser := NewParser()
 
 	filterFunc := func(entry *LogEntry) bool {
-		return entry.IsCommand() || entry.IsGroup()
+		return entry.IsGroup()
 	}
 
 	b.Run("seq2_filtered", func(b *testing.B) {
@@ -419,15 +417,6 @@ func BenchmarkContentClassification(b *testing.B) {
 		}
 		entries = append(entries, entry)
 	}
-
-	b.Run("is_command", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for _, entry := range entries {
-				_ = entry.IsCommand()
-			}
-		}
-	})
 
 	b.Run("is_group", func(b *testing.B) {
 		b.ResetTimer()

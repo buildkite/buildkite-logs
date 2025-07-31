@@ -123,31 +123,31 @@ func TestIterSeq2WithFiltering(t *testing.T) {
 
 	reader := strings.NewReader(testData)
 
-	// Filter for commands only
-	commands := []string{}
+	// Filter for entries containing '$' (command pattern)
+	dollarEntries := []string{}
 
 	for entry, err := range parser.All(reader) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
 
-		if entry.IsCommand() {
-			commands = append(commands, entry.Content)
+		if strings.Contains(entry.Content, "$") {
+			dollarEntries = append(dollarEntries, entry.Content)
 		}
 	}
 
-	expectedCommands := []string{
+	expectedDollarEntries := []string{
 		"$ /buildkite/agent/hooks/environment",
 		"$ git clone repo",
 	}
 
-	if len(commands) != len(expectedCommands) {
-		t.Fatalf("Expected %d commands, got %d", len(expectedCommands), len(commands))
+	if len(dollarEntries) != len(expectedDollarEntries) {
+		t.Fatalf("Expected %d entries with '$', got %d", len(expectedDollarEntries), len(dollarEntries))
 	}
 
-	for i, cmd := range commands {
-		if cmd != expectedCommands[i] {
-			t.Errorf("Command %d: expected %q, got %q", i, expectedCommands[i], cmd)
+	for i, entry := range dollarEntries {
+		if entry != expectedDollarEntries[i] {
+			t.Errorf("Dollar entry %d: expected %q, got %q", i, expectedDollarEntries[i], entry)
 		}
 	}
 }

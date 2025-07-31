@@ -29,7 +29,6 @@ type ProcessingSummary struct {
 	FilteredEntries int
 	BytesProcessed  int64
 	EntriesWithTime int
-	Commands        int
 	Sections        int
 }
 

@@ -56,17 +56,14 @@ func main() {
 			info.LastSeen = entryTime
 		}
 
-		if entry.IsCommand() {
-			info.Commands++
-		}
 	}
 
 	fmt.Printf("Processed %d total entries\n", totalEntries)
 	i := 1
 	for name, info := range groupMap {
 		if i <= 3 { // Show first 3 groups
-			fmt.Printf("%d. %s (%d entries, %d commands)\n",
-				i, name, info.EntryCount, info.Commands)
+			fmt.Printf("%d. %s (%d entries)\n",
+				i, name, info.EntryCount)
 		}
 		i++
 		if i > 3 {

@@ -107,9 +107,9 @@ func TestParquetSeq2ExportWithFilter(t *testing.T) {
 
 	reader := strings.NewReader(testData)
 
-	// Filter for commands only
+	// Filter for entries containing '$'
 	filterFunc := func(entry *LogEntry) bool {
-		return entry.IsCommand()
+		return strings.Contains(entry.Content, "$")
 	}
 
 	// Export using Seq2 with filter
@@ -130,7 +130,7 @@ func TestParquetSeq2ExportWithFilter(t *testing.T) {
 		_ = os.Remove(filename)
 	}()
 
-	// Check file is not empty (should contain 2 command entries)
+	// Check file is not empty (should contain 2 entries with '$')
 	info, err := os.Stat(filename)
 	if err != nil {
 		t.Fatalf("Failed to stat parquet file: %v", err)

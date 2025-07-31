@@ -187,9 +187,7 @@ func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 		if entry.HasTimestamp() {
 			summary.EntriesWithTime++
 		}
-		if entry.IsCommand() {
-			summary.Commands++
-		}
+
 		if entry.IsGroup() {
 			summary.Sections++
 		}
@@ -235,9 +233,7 @@ func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 		if entry.HasTimestamp() {
 			summary.EntriesWithTime++
 		}
-		if entry.IsCommand() {
-			summary.Commands++
-		}
+
 		if entry.IsGroup() {
 			summary.Sections++
 		}
@@ -271,7 +267,7 @@ func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 func shouldIncludeEntry(entry *buildkitelogs.LogEntry, filter string) bool {
 	switch filter {
 	case "command":
-		return entry.IsCommand()
+		return false // Commands filter no longer supported
 	case "group", "section": // Support both for backward compatibility
 		return entry.IsGroup()
 	default:
@@ -309,9 +305,7 @@ func exportToParquetSeq2(reader io.Reader, parser *buildkitelogs.Parser, filenam
 			if entry.HasTimestamp() {
 				summary.EntriesWithTime++
 			}
-			if entry.IsCommand() {
-				summary.Commands++
-			}
+
 			if entry.IsGroup() {
 				summary.Sections++
 			}
@@ -367,9 +361,7 @@ func exportToJSONLSeq2(reader io.Reader, parser *buildkitelogs.Parser, filename 
 		if entry.HasTimestamp() {
 			summary.EntriesWithTime++
 		}
-		if entry.IsCommand() {
-			summary.Commands++
-		}
+
 		if entry.IsGroup() {
 			summary.Sections++
 		}
@@ -404,9 +396,8 @@ func printSummary(summary *ProcessingSummary) {
 	}
 	fmt.Printf("Total entries: %d\n", summary.TotalEntries)
 	fmt.Printf("Entries with timestamps: %d\n", summary.EntriesWithTime)
-	fmt.Printf("Commands: %d\n", summary.Commands)
 	fmt.Printf("Sections: %d\n", summary.Sections)
-	fmt.Printf("Regular output: %d\n", summary.TotalEntries-summary.Commands-summary.Sections)
+	fmt.Printf("Regular output: %d\n", summary.TotalEntries-summary.Sections)
 
 	if summary.FilteredEntries > 0 {
 		fmt.Printf("Exported %d entries to %s\n", summary.FilteredEntries, "Parquet file")

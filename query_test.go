@@ -111,9 +111,6 @@ func TestParquetReader(t *testing.T) {
 			}
 
 			info.EntryCount++
-			if entry.IsCommand() {
-				info.Commands++
-			}
 
 			// Stop after processing some entries for test performance
 			if totalEntries >= 100 {
@@ -178,7 +175,7 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 			Timestamp: baseTime + 100,
 			Content:   "$ npm test",
 			Group:     "~~~ Running tests",
-			Flags:     LogFlags(1 << IsCommand),
+			Flags:     0,
 		},
 		{
 			Timestamp: baseTime + 1000,
@@ -217,9 +214,6 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 			info.LastSeen = entryTime
 		}
 
-		if entry.IsCommand() {
-			info.Commands++
-		}
 	}
 
 	if len(groupMap) != 2 {
@@ -233,9 +227,6 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 	}
 	if testsGroup.EntryCount != 2 {
 		t.Errorf("Expected entry count 2, got %d", testsGroup.EntryCount)
-	}
-	if testsGroup.Commands != 1 {
-		t.Errorf("Expected 1 command, got %d", testsGroup.Commands)
 	}
 }
 

@@ -3,7 +3,7 @@ services:
     image: golangci/golangci-lint:v2.1.6
     working_dir: /app
     volumes:
-      - .:/app:cached
+      - ..:/app:cached
       - gocache:/gocache
       - gomodcache:/gomodcache
     environment:
@@ -16,7 +16,7 @@ services:
       dockerfile: Dockerfile.build
     working_dir: /app
     volumes:
-      - .:/app:cached
+      - ..:/app:cached
       - gocache:/gocache
       - gomodcache:/gomodcache
 volumes:

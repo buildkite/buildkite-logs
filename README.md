@@ -1,6 +1,6 @@
-# Buildkite Logs Parser
+# Buildkite Logs Search & Query Library
 
-A Go library and CLI tool for parsing Buildkite log files that contain OSC (Operating System Command) sequences with timestamps.
+A Go library for searching and querying Buildkite CI/CD logs with intelligent caching and high-performance data analytics. Includes CLI tools for testing and debugging log parsing.
 
 [![Build status](https://badge.buildkite.com/e17b73d584291c31c6a95c657687d9049d225b93d9f3c3fcd2.svg)](https://buildkite.com/mark-at-wolfe-dot-id-dot-au/buildkite-logs-parquet)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wolfeidau/buildkite-logs-parquet)](https://goreportcard.com/report/github.com/wolfeidau/buildkite-logs-parquet) 
@@ -9,32 +9,90 @@ A Go library and CLI tool for parsing Buildkite log files that contain OSC (Oper
 
 ## Overview
 
-Buildkite logs use a special format where each log entry is prefixed with an OSC sequence containing a timestamp:
-```
-\x1b_bk;t=1745322209921\x07~~~ Running global environment hook
-```
+This library provides a high-level client API for searching and querying Buildkite CI/CD logs with intelligent caching and fast data analytics. Unlike [terminal-to-html](https://github.com/buildkite/terminal-to-html) which focuses on log display and rendering, this library is designed for **log data analysis, search, and programmatic access**.
 
-This parser extracts the timestamps and content, providing both a Go library API and a command-line tool for processing these logs.
+The library automatically downloads logs from the Buildkite API, caches them locally as efficient Parquet files, and provides powerful search and query capabilities. It handles Buildkite's special OSC sequence format (`\x1b_bk;t=timestamp\x07content`) and converts logs into structured, searchable data.
 
 ## Features
 
-- **OSC Sequence Parsing**: Correctly handles Buildkite's `\x1b_bk;t=timestamp\x07content` format
-- **Timestamp Extraction**: Converts millisecond timestamps to Go `time.Time` objects
-- **ANSI Code Handling**: Optional stripping of ANSI escape sequences for clean text output
-- **Content Classification**: Automatically identifies different types of log entries:
-  
-  - Section headers (lines starting with `~~~`, `---`, or `+++`)
-- **Multiple Data Sources**: Local files and Buildkite API integration
-- **Buildkite API**: Fetch logs directly from Buildkite jobs via REST API
-- **Multiple Output Formats**: Text, JSON, and Parquet export
-- **Filtering**: Filter logs by entry type (command, group)
-- **Stream Processing**: Parse from any `io.Reader`
-- **Group Tracking**: Automatically associate entries with build groups/sections
-- **Parquet Export**: Efficient columnar storage for analytics and data processing
-- **Parquet Query**: Fast querying of exported Parquet files with Apache Arrow Go v18
-- **Parser Debugging**: Debug command for troubleshooting OSC sequence parsing issues
+### Primary: High-Level Client API
+- **Intelligent Caching**: Automatic download and caching of Buildkite logs with TTL support
+- **Fast Search & Query**: Built-in search capabilities with regex patterns, filtering, and context
+- **Buildkite API Integration**: Direct fetching from Buildkite jobs via REST API with authentication
+- **Parquet Storage**: Efficient columnar storage for fast analytics and data processing
+- **Streaming Processing**: Memory-efficient processing of logs of any size using Go 1.23+ iterators
+- **Observability Hooks**: Optional hooks for tracing and logging without framework coupling
 
-## CLI Usage
+### Log Processing Engine
+- **OSC Sequence Parsing**: Correctly handles Buildkite's `\x1b_bk;t=timestamp\x07content` format
+- **Group Tracking**: Automatically associate entries with build sections (`~~~`, `---`, `+++`)
+- **Content Classification**: Identifies commands, group headers, and regular output
+- **ANSI Code Handling**: Optional stripping of ANSI escape sequences for clean text output
+- **Multiple Output Formats**: Text, JSON, and Parquet export with filtering support
+
+### CLI Tools (Development & Debugging)
+- **Parse Command**: Convert logs to various formats for testing
+- **Query Command**: Fast querying of cached Parquet files
+- **Debug Command**: Troubleshoot OSC sequence parsing issues
+
+## Quick Start
+
+For common use cases, the library provides a high-level `Client` API that simplifies downloading, caching, and querying Buildkite logs:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+    
+    "github.com/buildkite/go-buildkite/v4"
+    buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
+)
+
+func main() {
+    // Create buildkite client
+    client, _ := buildkite.NewOpts(buildkite.WithTokenAuth("your-token"))
+    
+    // Create high-level Client
+    buildkiteLogsClient, err := buildkitelogs.NewClient(client, "file://~/.bklog")
+    if err != nil {
+        panic(err)
+    }
+    defer buildkiteLogsClient.Close()
+    
+    ctx := context.Background()
+    
+    // Download, cache, and get a reader in one step
+    reader, err := buildkiteLogsClient.NewReader(
+        ctx, "myorg", "mypipeline", "123", "job-id",
+        time.Minute*5, false, // TTL and force refresh
+    )
+    if err != nil {
+        panic(err)
+    }
+    
+    // Query the logs
+    for entry, err := range reader.ReadEntriesIter() {
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println(entry.Content)
+    }
+}
+```
+
+The `Client` provides:
+- **Simplified API**: Easy-to-use methods for common operations
+- **Automatic caching**: Intelligent caching with TTL support
+- **Multiple backends**: Support for both official `*buildkite.Client` and custom `BuildkiteAPI` implementations
+- **Parameter validation**: Built-in validation with descriptive error messages
+- **Hooks System**: Optional hooks for observability and tracing without coupling to specific frameworks
+
+For detailed documentation, see [docs/client-api.md](docs/client-api.md). For a complete working example, see [examples/high-level-client/](examples/high-level-client/).
+
+## CLI Tools (Development & Debugging)
 
 ### Installation
 
@@ -747,95 +805,7 @@ The `flags` column uses bitwise operations to efficiently store multiple boolean
 ```
 This uses the modern `iter.Seq2[*LogEntry, error]` iterator pattern for memory-efficient processing.
 
-## High-Level Client API
 
-For common use cases, the library provides a high-level `Client` API that simplifies downloading, caching, and querying Buildkite logs:
-
-```go
-package main
-
-import (
-    "context"
-    "time"
-    
-    "github.com/buildkite/go-buildkite/v4"
-    buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
-)
-
-func main() {
-    // Create buildkite client
-    client, _ := buildkite.NewOpts(buildkite.WithTokenAuth("your-token"))
-    
-    // Create high-level Client
-    buildkiteLogsClient, err := buildkitelogs.NewClient(client, "file://~/.bklog")
-    if err != nil {
-        panic(err)
-    }
-    defer buildkiteLogsClient.Close()
-    
-    ctx := context.Background()
-    
-    // Download, cache, and get a reader in one step
-    reader, err := buildkiteLogsClient.NewReader(
-        ctx, "myorg", "mypipeline", "123", "job-id",
-        time.Minute*5, false, // TTL and force refresh
-    )
-    if err != nil {
-        panic(err)
-    }
-    
-    // Query the logs
-    for entry, err := range reader.ReadEntriesIter() {
-        if err != nil {
-            panic(err)
-        }
-        fmt.Println(entry.Content)
-    }
-}
-```
-
-The `Client` provides:
-- **Simplified API**: Easy-to-use methods for common operations
-- **Automatic caching**: Intelligent caching with TTL support
-- **Multiple backends**: Support for both official `*buildkite.Client` and custom `BuildkiteAPI` implementations
-- **Parameter validation**: Built-in validation with descriptive error messages
-- **Hooks System**: Optional hooks for observability and tracing without coupling to specific frameworks
-
-### Hooks for Observability
-
-The client supports optional hooks that are invoked after each stage of the download and cache process, providing timing and context data for tracing or logging:
-
-```go
-// Add hooks for observability
-client.Hooks().AddAfterCacheCheck(func(ctx context.Context, result *buildkitelogs.CacheCheckResult) {
-    log.Printf("Cache check for %s: exists=%t, took %v", result.BlobKey, result.Exists, result.Duration)
-})
-
-client.Hooks().AddAfterLogDownload(func(ctx context.Context, result *buildkitelogs.LogDownloadResult) {
-    log.Printf("Downloaded %d bytes in %v", result.LogSize, result.Duration)
-})
-
-client.Hooks().AddAfterLogParsing(func(ctx context.Context, result *buildkitelogs.LogParsingResult) {
-    log.Printf("Parsed logs to %d bytes Parquet in %v", result.ParquetSize, result.Duration)
-})
-
-client.Hooks().AddAfterBlobStorage(func(ctx context.Context, result *buildkitelogs.BlobStorageResult) {
-    log.Printf("Stored %d bytes to blob storage (terminal: %t) in %v", 
-        result.DataSize, result.IsTerminal, result.Duration)
-})
-```
-
-Available hook types:
-- `OnAfterCacheCheck` - Blob storage cache existence check
-- `OnAfterJobStatus` - Buildkite job status API call  
-- `OnAfterLogDownload` - Log download from Buildkite API
-- `OnAfterLogParsing` - Log parsing and Parquet conversion
-- `OnAfterBlobStorage` - Data storage in blob backend
-- `OnAfterLocalCache` - Local cache file creation
-
-Each hook receives detailed timing and context information, making it easy to add distributed tracing, metrics, or custom logging without modifying the core library.
-
-For detailed documentation, see [docs/client-api.md](docs/client-api.md). For a complete working example, see [examples/high-level-client/](examples/high-level-client/).
 
 ## API Reference
 

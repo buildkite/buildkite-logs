@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
+	buildkitelogs "github.com/buildkite/buildkite-logs"
 )
 
 func TestQueryConfigStripANSI(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
+	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/go-buildkite/v4"
-	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
 )
 
 func main() {

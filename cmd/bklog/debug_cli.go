@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
+	buildkitelogs "github.com/buildkite/buildkite-logs"
 )
 
 type DebugConfig struct {

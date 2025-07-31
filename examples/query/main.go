@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
+	buildkitelogs "github.com/buildkite/buildkite-logs"
 )
 
 func main() {

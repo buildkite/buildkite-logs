@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
+	buildkitelogs "github.com/buildkite/buildkite-logs"
 )
 
 func handleParseCommand() {

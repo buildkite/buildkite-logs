@@ -197,7 +197,6 @@ func showParseDebug(parser *buildkitelogs.Parser, line string, config *DebugConf
 			fmt.Printf("Content: %q\n", entry.Content)
 			fmt.Printf("Group: %q\n", entry.Group)
 			fmt.Printf("RawLine length: %d\n", len(entry.RawLine))
-			fmt.Printf("IsCommand: %v\n", entry.IsCommand())
 			fmt.Printf("IsGroup: %v\n", entry.IsGroup())
 		} else {
 			if !entry.Timestamp.IsZero() {

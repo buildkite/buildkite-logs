@@ -147,11 +147,6 @@ func (entry *LogEntry) HasTimestamp() bool {
 	return !entry.Timestamp.IsZero()
 }
 
-// IsCommand returns true if the log entry appears to be a command execution
-func (entry *LogEntry) IsCommand() bool {
-	return strings.HasPrefix(entry.Content, "$ ")
-}
-
 // IsGroup returns true if the log entry appears to be a group header
 func (entry *LogEntry) IsGroup() bool {
 	return strings.HasPrefix(entry.Content, "~~~ ") || strings.HasPrefix(entry.Content, "--- ") || strings.HasPrefix(entry.Content, "+++ ")
@@ -167,9 +162,6 @@ func (entry *LogEntry) ComputeFlags() LogFlags {
 	var flags LogFlags
 	if entry.HasTimestamp() {
 		flags.Set(HasTimestamp)
-	}
-	if entry.IsCommand() {
-		flags.Set(IsCommand)
 	}
 	if entry.IsGroup() {
 		flags.Set(IsGroup)

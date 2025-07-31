@@ -21,7 +21,6 @@ type LogFlag int32
 
 const (
 	HasTimestamp LogFlag = iota
-	IsCommand
 	IsGroup
 )
 
@@ -53,11 +52,6 @@ func (lf LogFlags) HasTimestamp() bool {
 	return lf.Has(HasTimestamp)
 }
 
-// IsCommand returns true if IsCommand flag is set
-func (lf LogFlags) IsCommand() bool {
-	return lf.Has(IsCommand)
-}
-
 // IsGroup returns true if IsGroup flag is set
 func (lf LogFlags) IsGroup() bool {
 	return lf.Has(IsGroup)
@@ -75,11 +69,6 @@ type ParquetLogEntry struct {
 // HasTime returns true if the entry has a timestamp (backward compatibility)
 func (entry *ParquetLogEntry) HasTime() bool {
 	return entry.Flags.HasTimestamp()
-}
-
-// IsCommand returns true if the entry is a command (backward compatibility)
-func (entry *ParquetLogEntry) IsCommand() bool {
-	return entry.Flags.IsCommand()
 }
 
 // IsGroup returns true if the entry is a group header (backward compatibility)
@@ -111,7 +100,6 @@ type GroupInfo struct {
 	EntryCount int       `json:"entry_count"`
 	FirstSeen  time.Time `json:"first_seen"`
 	LastSeen   time.Time `json:"last_seen"`
-	Commands   int       `json:"commands"`
 }
 
 // SearchOptions configures regex search behavior

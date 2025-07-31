@@ -117,9 +117,6 @@ func BenchmarkStreamingGroupAnalysis(b *testing.B) {
 			}
 
 			info.EntryCount++
-			if entry.IsCommand() {
-				info.Commands++
-			}
 		}
 
 		if len(groupMap) == 0 {
@@ -349,9 +346,6 @@ func BenchmarkStreamingScalability(b *testing.B) {
 				}
 				// Complex processing: build statistics
 				groupStats[entry.Group]++
-				if entry.IsCommand() {
-					groupStats[entry.Group+"_commands"]++
-				}
 			}
 		}
 	})

@@ -22,7 +22,7 @@ This parser extracts the timestamps and content, providing both a Go library API
 - **Timestamp Extraction**: Converts millisecond timestamps to Go `time.Time` objects
 - **ANSI Code Handling**: Optional stripping of ANSI escape sequences for clean text output
 - **Content Classification**: Automatically identifies different types of log entries:
-  - Commands (lines starting with `$`)
+  
   - Section headers (lines starting with `~~~`, `---`, or `+++`)
 - **Multiple Data Sources**: Local files and Buildkite API integration
 - **Buildkite API**: Fetch logs directly from Buildkite jobs via REST API
@@ -81,9 +81,9 @@ goreleaser build --snapshot --clean --single-target
 ./build/bklog parse -file buildkite.log -strip-ansi
 ```
 
-**Output only commands:**
+**Output only sections:**
 ```bash
-./build/bklog parse -file buildkite.log -filter command -strip-ansi
+./build/bklog parse -file buildkite.log -filter section -strip-ansi
 ```
 
 **Output only group headers:**
@@ -110,10 +110,10 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog parse -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -parquet logs.parquet -summary
 ```
 
-**Filter and export only commands from API:**
+**Filter and export only sections from API:**
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
-./build/bklog parse -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -filter command -json
+./build/bklog parse -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -filter section -json
 ```
 
 **Show processing statistics:**
@@ -126,7 +126,7 @@ Output:
 Bytes processed: 24.4 KB
 Total entries: 212
 Entries with timestamps: 212
-Commands: 15
+
 Sections: 13
 Regular output: 184
 ```
@@ -154,7 +154,7 @@ Output:
 Bytes processed: 24.4 KB
 Total entries: 212
 Entries with timestamps: 212
-Commands: 15
+
 Sections: 13
 Regular output: 184
 Exported 212 entries to output.parquet
@@ -162,9 +162,9 @@ Exported 212 entries to output.parquet
 
 **Export filtered data to Parquet:**
 ```bash
-./build/bklog -file buildkite.log -parquet commands.parquet -filter command -summary
+./build/bklog -file buildkite.log -parquet sections.parquet -filter section -summary
 ```
-This exports only command entries to a smaller Parquet file for analysis.
+This exports only section entries to a smaller Parquet file for analysis.
 
 ### Querying Parquet Files
 
@@ -178,7 +178,7 @@ Output:
 ```
 Groups found: 5
 
-GROUP NAME                                ENTRIES COMMANDS          FIRST SEEN           LAST SEEN
+GROUP NAME                                ENTRIES          FIRST SEEN           LAST SEEN
 ------------------------------------------------------------------------------------------------------------
 ~~~ Running global environment hook             2        1 2025-04-22 21:43:29 2025-04-22 21:43:29
 ~~~ Running global pre-checkout hook            2        1 2025-04-22 21:43:29 2025-04-22 21:43:29
@@ -365,7 +365,7 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-groups
 ```
 
-**Query commands directly from Buildkite API:**
+**Query logs directly from Buildkite API:**
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-commands

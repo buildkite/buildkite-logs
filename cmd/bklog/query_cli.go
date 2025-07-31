@@ -18,7 +18,7 @@ func handleQueryCommand() {
 
 	queryFlags := flag.NewFlagSet("query", flag.ExitOnError)
 	queryFlags.StringVar(&config.ParquetFile, "file", "", "Path to Parquet log file (use this OR API parameters)")
-	queryFlags.StringVar(&config.Operation, "op", "list-groups", "Query operation: list-groups, list-commands, by-group, info, tail, seek, dump, search")
+	queryFlags.StringVar(&config.Operation, "op", "list-groups", "Query operation: list-groups, by-group, info, tail, seek, dump, search")
 	queryFlags.StringVar(&config.GroupName, "group", "", "Group name to filter by (for by-group operation)")
 	queryFlags.StringVar(&config.Format, "format", "text", "Output format: text, json")
 	queryFlags.BoolVar(&config.ShowStats, "stats", true, "Show query statistics")
@@ -61,7 +61,6 @@ func handleQueryCommand() {
 		queryFlags.PrintDefaults()
 		fmt.Println("\nOperations:")
 		fmt.Println("  list-groups    List all groups with statistics")
-		fmt.Println("  list-commands  List all command entries")
 		fmt.Println("  by-group       Show entries for a specific group")
 		fmt.Println("  search         Search entries using regex pattern with context")
 		fmt.Println("  info           Show file metadata (row count, file size, etc.)")
@@ -71,7 +70,7 @@ func handleQueryCommand() {
 		fmt.Println("\nExamples:")
 		fmt.Printf("  # Local file:\n")
 		fmt.Printf("  %s query -file logs.parquet -op list-groups\n", os.Args[0])
-		fmt.Printf("  %s query -file logs.parquet -op list-commands\n", os.Args[0])
+
 		fmt.Printf("  %s query -file logs.parquet -op by-group -group \"Running tests\"\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"error|failed\" -C 3\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"test.*failed\" --reverse -C 2\n", os.Args[0])
@@ -140,9 +139,6 @@ func formatLogEntries(entries []buildkitelogs.ParquetLogEntry, config *QueryConf
 			timestamp := time.Unix(0, entry.Timestamp*int64(time.Millisecond))
 
 			var markers []string
-			if entry.IsCommand() {
-				markers = append(markers, "CMD")
-			}
 			if entry.IsGroup() {
 				markers = append(markers, "GRP")
 			}
@@ -336,8 +332,7 @@ func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig)
 	switch config.Operation {
 	case "list-groups":
 		return streamListGroups(reader, config, start)
-	case "list-commands":
-		return streamListCommands(reader, config, start)
+
 	case "info":
 		return showFileInfo(reader, config)
 	case "by-group":
@@ -400,9 +395,6 @@ func streamListGroups(reader *buildkitelogs.ParquetReader, config *QueryConfig, 
 			info.LastSeen = entryTime
 		}
 
-		if entry.IsCommand() {
-			info.Commands++
-		}
 	}
 
 	// Convert to slice and sort
@@ -423,36 +415,6 @@ func streamListGroups(reader *buildkitelogs.ParquetReader, config *QueryConfig, 
 	// Format output
 	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
 	return formatStreamingGroupsResult(groups, totalEntries, queryTime, config)
-}
-
-// streamListCommands handles list-commands operation using streaming
-func streamListCommands(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
-	var commands []buildkitelogs.ParquetLogEntry
-	totalEntries := 0
-	commandCount := 0
-
-	for entry, err := range reader.ReadEntriesIter() {
-		if err != nil {
-			return fmt.Errorf("error reading entries: %w", err)
-		}
-
-		totalEntries++
-
-		// Filter for command entries only
-		if entry.IsCommand() {
-			commandCount++
-			commands = append(commands, entry)
-
-			// Apply limit if specified (early termination advantage)
-			if config.LimitEntries > 0 && commandCount >= config.LimitEntries {
-				break
-			}
-		}
-	}
-
-	// Format output
-	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
-	return formatStreamingCommandsResult(commands, totalEntries, commandCount, queryTime, config)
 }
 
 // streamSearch handles search operation using streaming with regex pattern matching and context lines
@@ -549,15 +511,14 @@ func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries 
 	}
 
 	// Print table header
-	fmt.Printf("%-40s %8s %8s %19s %19s\n",
-		"GROUP NAME", "ENTRIES", "COMMANDS", "FIRST SEEN", "LAST SEEN")
-	fmt.Println(strings.Repeat("-", 104))
+	fmt.Printf("%-40s %8s %19s %19s\n",
+		"GROUP NAME", "ENTRIES", "FIRST SEEN", "LAST SEEN")
+	fmt.Println(strings.Repeat("-", 89))
 
 	for _, group := range groups {
-		fmt.Printf("%-40s %8d %8d %19s %19s\n",
+		fmt.Printf("%-40s %8d %19s %19s\n",
 			truncateString(group.Name, 40),
 			group.EntryCount,
-			group.Commands,
 			group.FirstSeen.Format("2006-01-02 15:04:05"),
 			group.LastSeen.Format("2006-01-02 15:04:05"))
 	}
@@ -566,39 +527,6 @@ func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries 
 		fmt.Fprintf(os.Stderr, "\n--- Query Statistics (Streaming) ---\n")
 		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
 		fmt.Fprintf(os.Stderr, "Total groups: %d\n", len(groups))
-		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
-	}
-
-	return nil
-}
-
-// formatStreamingCommandsResult formats commands output from streaming query
-func formatStreamingCommandsResult(commands []buildkitelogs.ParquetLogEntry, totalEntries, commandCount int, queryTime float64, config *QueryConfig) error {
-	if config.Format == "json" {
-		return writeJSONLines(commands, os.Stdout)
-	}
-
-	// Output commands using consistent formatting
-	if !config.RawOutput {
-		limitText := ""
-		if config.LimitEntries > 0 && commandCount >= config.LimitEntries {
-			limitText = fmt.Sprintf(" (limited to %d)", config.LimitEntries)
-		}
-		fmt.Fprintf(os.Stderr, "Commands found: %d%s\n\n", commandCount, limitText)
-
-		if len(commands) == 0 {
-			fmt.Fprintln(os.Stderr, "No commands found.")
-		}
-	}
-
-	if len(commands) > 0 {
-		formatLogEntries(commands, config)
-	}
-
-	if config.ShowStats {
-		fmt.Fprintf(os.Stderr, "\n--- Command Query Statistics (Streaming) ---\n")
-		fmt.Fprintf(os.Stderr, "Total entries: %d\n", totalEntries)
-		fmt.Fprintf(os.Stderr, "Total commands: %d\n", commandCount)
 		fmt.Fprintf(os.Stderr, "Query time: %.2f ms\n", queryTime)
 	}
 

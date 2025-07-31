@@ -124,9 +124,6 @@ func BenchmarkStreamingFiles(b *testing.B) {
 					}
 
 					info.EntryCount++
-					if entry.IsCommand() {
-						info.Commands++
-					}
 				}
 				_ = groupMap
 			}

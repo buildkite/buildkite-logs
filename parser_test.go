@@ -81,31 +81,26 @@ func TestLogEntryClassification(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
-		wantCommand bool
 		wantSection bool
 	}{
 		{
 			name:        "Command with ANSI",
 			input:       "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment",
-			wantCommand: false,
 			wantSection: false,
 		},
 		{
 			name:        "Section header",
 			input:       "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
-			wantCommand: false,
 			wantSection: true,
 		},
 		{
 			name:        "Build artifact section",
 			input:       "\x1b_bk;t=1745322210701\x07+++ :frame_with_picture: Inline image uploaded",
-			wantCommand: false,
 			wantSection: true,
 		},
 		{
 			name:        "Regular output",
 			input:       "\x1b_bk;t=1745322210701\x07Cloning into '.'...",
-			wantCommand: false,
 			wantSection: false,
 		},
 	}
@@ -115,10 +110,6 @@ func TestLogEntryClassification(t *testing.T) {
 			entry, err := parser.ParseLine(tt.input)
 			if err != nil {
 				t.Fatalf("ParseLine() error = %v", err)
-			}
-
-			if entry.IsCommand() != tt.wantCommand {
-				t.Errorf("IsCommand() = %v, want %v", entry.IsCommand(), tt.wantCommand)
 			}
 
 			if entry.IsSection() != tt.wantSection {
@@ -163,9 +154,6 @@ func TestParseReader(t *testing.T) {
 	// Check second entry
 	if !entries[1].HasTimestamp() {
 		t.Error("Second entry should have timestamp")
-	}
-	if entries[1].IsCommand() {
-		t.Error("Second entry should not be a command (ANSI codes present)")
 	}
 
 	// Check third entry (regular line)
@@ -215,9 +203,6 @@ func TestLogIterator(t *testing.T) {
 	entry = iterator.Entry()
 	if !entry.HasTimestamp() {
 		t.Error("Second entry should have timestamp")
-	}
-	if entry.IsCommand() {
-		t.Error("Second entry should not be a command (ANSI codes present)")
 	}
 
 	// Test third entry (regular line)

@@ -3,8 +3,8 @@
 A Go library for searching and querying Buildkite CI/CD logs with intelligent caching and high-performance data analytics. Includes CLI tools for testing and debugging log parsing.
 
 [![Build status](https://badge.buildkite.com/e17b73d584291c31c6a95c657687d9049d225b93d9f3c3fcd2.svg)](https://buildkite.com/mark-at-wolfe-dot-id-dot-au/buildkite-logs-parquet)
-[![Go Report Card](https://goreportcard.com/badge/github.com/wolfeidau/buildkite-logs-parquet)](https://goreportcard.com/report/github.com/wolfeidau/buildkite-logs-parquet) 
-[![Documentation](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/wolfeidau/buildkite-logs-parquet)
+[![Go Report Card](https://goreportcard.com/badge/github.com/buildkite/buildkite-logs)](https://goreportcard.com/report/github.com/buildkite/buildkite-logs) 
+[![Documentation](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/buildkite/buildkite-logs)
 
 
 ## Overview
@@ -48,7 +48,7 @@ import (
     "time"
     
     "github.com/buildkite/go-buildkite/v4"
-    buildkitelogs "github.com/wolfeidau/buildkite-logs-parquet"
+    buildkitelogs "github.com/buildkite/buildkite-logs"
 )
 
 func main() {

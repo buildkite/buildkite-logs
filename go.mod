@@ -1,4 +1,4 @@
-module github.com/wolfeidau/buildkite-logs-parquet
+module github.com/buildkite/buildkite-logs
 
 go 1.24.4
 

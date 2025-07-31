@@ -6,6 +6,7 @@ steps:
         label: ':golangci-lint: lint'
         plugins:
           - docker-compose#v5.10.0:
+              config: .buildkite/docker-compose.yaml
               run: golangci-lint
               progress: plain
               tty: true
@@ -19,6 +20,7 @@ steps:
           - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"        
         plugins:
           - docker-compose#v5.10.0:
+              config: .buildkite/docker-compose.yaml
               run: golang
               progress: plain
               tty: true

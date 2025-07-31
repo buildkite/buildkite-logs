@@ -114,36 +114,6 @@ func BenchmarkIterator(b *testing.B) {
 	}
 }
 
-// BenchmarkParseReaderLegacy tests the performance of collecting all entries in memory
-func BenchmarkParseReaderLegacy(b *testing.B) {
-	sizes := []int{100, 1000, 10000, 100000}
-
-	for _, size := range sizes {
-		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
-			data := generateTestData(size)
-			parser := NewParser()
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				reader := strings.NewReader(data)
-
-				// Collect all entries using streaming iterator (equivalent to old ParseReader)
-				var entries []*LogEntry
-				for entry, err := range parser.All(reader) {
-					if err != nil {
-						b.Fatal(err)
-					}
-					entries = append(entries, entry)
-				}
-
-				if len(entries) != size {
-					b.Fatalf("Expected %d entries, got %d", size, len(entries))
-				}
-			}
-		})
-	}
-}
-
 // BenchmarkIteratorWithFiltering tests iterator performance with filtering
 func BenchmarkIteratorWithFiltering(b *testing.B) {
 	data := generateTestData(10000)
@@ -254,78 +224,6 @@ func BenchmarkSeq2Iterator(b *testing.B) {
 	}
 }
 
-// BenchmarkSeq2WithFiltering tests Seq2 iterator performance with filtering
-func BenchmarkSeq2WithFiltering(b *testing.B) {
-	data := generateTestData(10000)
-	parser := NewParser()
-
-	filters := []struct {
-		name string
-		fn   func(*LogEntry) bool
-	}{
-		{"groups", func(e *LogEntry) bool { return e.IsGroup() }},
-	}
-
-	for _, filter := range filters {
-		b.Run(filter.name, func(b *testing.B) {
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				reader := strings.NewReader(data)
-
-				count := 0
-				for entry, err := range parser.All(reader) {
-					if err != nil {
-						b.Fatal(err)
-					}
-					if filter.fn(entry) {
-						count++
-					}
-				}
-			}
-		})
-	}
-}
-
-// BenchmarkIteratorComparison compares traditional iterator vs Seq2 performance
-func BenchmarkIteratorComparison(b *testing.B) {
-	data := generateTestData(10000)
-	parser := NewParser()
-
-	b.Run("traditional_iterator", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			reader := strings.NewReader(data)
-			iterator := parser.NewIterator(reader)
-
-			count := 0
-			for iterator.Next() {
-				count++
-				_ = iterator.Entry()
-			}
-
-			if err := iterator.Err(); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-
-	b.Run("seq2_iterator", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			reader := strings.NewReader(data)
-
-			count := 0
-			for entry, err := range parser.All(reader) {
-				if err != nil {
-					b.Fatal(err)
-				}
-				count++
-				_ = entry
-			}
-		}
-	})
-}
-
 // BenchmarkParquetSeq2Export tests Seq2-based Parquet export
 func BenchmarkParquetSeq2Export(b *testing.B) {
 	sizes := []int{100, 1000, 10000}
@@ -350,31 +248,6 @@ func BenchmarkParquetSeq2Export(b *testing.B) {
 			}
 		})
 	}
-}
-
-// BenchmarkParquetWithFiltering tests filtered Parquet export performance
-func BenchmarkParquetWithFiltering(b *testing.B) {
-	data := generateTestData(5000)
-	parser := NewParser()
-
-	filterFunc := func(entry *LogEntry) bool {
-		return entry.IsGroup()
-	}
-
-	b.Run("seq2_filtered", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			reader := strings.NewReader(data)
-			filename := fmt.Sprintf("bench_filtered_%d.parquet", i)
-
-			err := ExportSeq2ToParquetWithFilter(parser.All(reader), filename, filterFunc)
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			_ = os.Remove(filename) // Ignore error in benchmark cleanup
-		}
-	})
 }
 
 // BenchmarkByteParserCore tests the core byte parser performance

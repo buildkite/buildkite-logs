@@ -68,25 +68,6 @@ func BenchmarkStripANSIAllocs(b *testing.B) {
 	})
 }
 
-// Direct performance comparison
-func BenchmarkStripANSIComparison(b *testing.B) {
-	testInput := benchInputs["buildkite_log"]
-
-	b.Run("Custom", func(b *testing.B) {
-		b.SetBytes(int64(len(testInput)))
-		for i := 0; i < b.N; i++ {
-			_ = StripANSI(testInput)
-		}
-	})
-
-	b.Run("Regex", func(b *testing.B) {
-		b.SetBytes(int64(len(testInput)))
-		for i := 0; i < b.N; i++ {
-			_ = StripANSIRegex(testInput)
-		}
-	})
-}
-
 // Benchmark with different ANSI code densities
 func BenchmarkStripANSIDensity(b *testing.B) {
 	// Generate inputs with different ANSI code densities
@@ -153,16 +134,6 @@ func BenchmarkLogProcessingScenario(b *testing.B) {
 	}
 }
 
-// Benchmark the fast path optimization (no ANSI codes)
-func BenchmarkFastPath(b *testing.B) {
-	noAnsiInput := strings.Repeat("regular log line without any escape codes\n", 1000)
-
-	b.SetBytes(int64(len(noAnsiInput)))
-	for i := 0; i < b.N; i++ {
-		_ = StripANSI(noAnsiInput)
-	}
-}
-
 // Benchmark CleanContent and CleanGroup methods
 func BenchmarkParquetLogEntryClean(b *testing.B) {
 	entry := ParquetLogEntry{
@@ -188,15 +159,4 @@ func BenchmarkParquetLogEntryClean(b *testing.B) {
 			_ = entry.CleanGroup(true)
 		}
 	})
-}
-
-// Benchmark worst-case scenario with many incomplete sequences
-func BenchmarkWorstCase(b *testing.B) {
-	// Create input with many incomplete ANSI sequences
-	worstCase := strings.Repeat("\x1b[\x1b[\x1b[text", 1000)
-
-	b.SetBytes(int64(len(worstCase)))
-	for i := 0; i < b.N; i++ {
-		_ = StripANSI(worstCase)
-	}
 }

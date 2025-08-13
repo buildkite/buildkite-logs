@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	defaultBufferSize = 64 * 1024
+	maxBufferSize     = 1024 * 1024
+)
+
 // LogEntry represents a parsed Buildkite log entry
 type LogEntry struct {
 	Timestamp time.Time
@@ -61,10 +66,20 @@ func (p *Parser) ParseLine(line string) (*LogEntry, error) {
 	return entry, nil
 }
 
+// configureScanner configures a bufio.Scanner with appropriate buffer settings
+// for handling potentially very long log lines
+func configureScanner(scanner *bufio.Scanner) {
+	// Set a large buffer to handle very long log lines (default is 64KB, set to 1MB)
+	// see https://pkg.go.dev/bufio#MaxScanTokenSize
+	scanner.Buffer(make([]byte, 0, defaultBufferSize), maxBufferSize)
+}
+
 // NewIterator creates a new LogIterator for memory-efficient processing
 func (p *Parser) NewIterator(reader io.Reader) *LogIterator {
+	scanner := bufio.NewScanner(reader)
+	configureScanner(scanner)
 	return &LogIterator{
-		scanner: bufio.NewScanner(reader),
+		scanner: scanner,
 		parser:  p,
 	}
 }
@@ -75,6 +90,7 @@ func (p *Parser) NewIterator(reader io.Reader) *LogIterator {
 func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error] {
 	return func(yield func(*LogEntry, error) bool) {
 		scanner := bufio.NewScanner(reader)
+		configureScanner(scanner)
 		// Create isolated parser state for this iteration to prevent state contamination
 		localCurrentGroup := ""
 

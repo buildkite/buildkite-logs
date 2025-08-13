@@ -13,6 +13,19 @@ This library provides a high-level client API for searching and querying Buildki
 
 The library automatically downloads logs from the Buildkite API, caches them locally as efficient Parquet files, and provides powerful search and query capabilities. It handles Buildkite's special OSC sequence format (`\x1b_bk;t=timestamp\x07content`) and converts logs into structured, searchable data.
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [CLI Tools](#cli-tools-development--debugging)
+- [Installation](#installation)
+- [Examples](#examples)
+- [Querying Parquet Files](#querying-parquet-files)
+- [API Reference](#api-reference)
+- [Performance](#performance)
+- [Testing](#testing)
+- [License](#license)
+
 ## Features
 
 ### Primary: High-Level Client API
@@ -20,7 +33,7 @@ The library automatically downloads logs from the Buildkite API, caches them loc
 - **Fast Search & Query**: Built-in search capabilities with regex patterns, filtering, and context
 - **Buildkite API Integration**: Direct fetching from Buildkite jobs via REST API with authentication
 - **Parquet Storage**: Efficient columnar storage for fast analytics and data processing
-- **Streaming Processing**: Memory-efficient processing of logs of any size using Go 1.23+ iterators
+- **Streaming Processing**: Memory-efficient processing of logs of any size using Go iterators
 - **Observability Hooks**: Optional hooks for tracing and logging without framework coupling
 
 ### Log Processing Engine
@@ -136,22 +149,22 @@ goreleaser build --snapshot --clean --single-target
 
 **Parse a log file with timestamps:**
 ```bash
-./build/bklog parse -file buildkite.log -strip-ansi
+./build/bklog parse -file buildkite.log
 ```
 
 **Output only sections:**
 ```bash
-./build/bklog parse -file buildkite.log -filter section -strip-ansi
+./build/bklog parse -file buildkite.log -filter section
 ```
 
 **Output only group headers:**
 ```bash
-./build/bklog parse -file buildkite.log -filter group -strip-ansi
+./build/bklog parse -file buildkite.log -filter group
 ```
 
 **JSON output:**
 ```bash
-./build/bklog parse -file buildkite.log -json -strip-ansi
+./build/bklog parse -file buildkite.log -json
 ```
 
 #### Buildkite API Integration
@@ -159,7 +172,7 @@ goreleaser build --snapshot --clean --single-target
 **Fetch logs directly from Buildkite API:**
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
-./build/bklog parse -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -strip-ansi
+./build/bklog parse -org myorg -pipeline mypipeline -build 123 -job abc-def-456
 ```
 
 **Export API logs to Parquet:**
@@ -176,7 +189,7 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 
 **Show processing statistics:**
 ```bash
-./build/bklog parse -file buildkite.log -summary -strip-ansi
+./build/bklog parse -file buildkite.log -summary
 ```
 Output:
 ```
@@ -191,7 +204,7 @@ Regular output: 184
 
 **Show group/section information:**
 ```bash
-./build/bklog -file buildkite.log -groups -strip-ansi | head -5
+./build/bklog parse -file buildkite.log -groups | head -5
 ```
 Output:
 ```
@@ -204,7 +217,7 @@ Output:
 
 **Export to Parquet format:**
 ```bash
-./build/bklog -file buildkite.log -parquet output.parquet -summary
+./build/bklog parse -file buildkite.log -parquet output.parquet -summary
 ```
 Output:
 ```
@@ -220,7 +233,7 @@ Exported 212 entries to output.parquet
 
 **Export filtered data to Parquet:**
 ```bash
-./build/bklog -file buildkite.log -parquet sections.parquet -filter section -summary
+./build/bklog parse -file buildkite.log -parquet sections.parquet -filter section -summary
 ```
 This exports only section entries to a smaller Parquet file for analysis.
 
@@ -249,36 +262,7 @@ Total groups: 5
 Query time: 2.36 ms
 ```
 
-**List all command entries:**
-```bash
-./build/bklog query -file output.parquet -op list-commands
-```
-Output:
-```
-Commands found: 15
 
-[2025-04-22 21:43:29.921] [~~~ Running global environment hook] $ /buildkite/agent/hooks/environment
-[2025-04-22 21:43:29.949] [~~~ Running global pre-checkout hook] $ /buildkite/agent/hooks/pre-checkout
-[2025-04-22 21:43:29.975] [~~~ Preparing working directory] $ cd /buildkite/builds/g01mvtp4g0vi2-1/test/bash-example
-[2025-04-22 21:43:29.975] [~~~ Preparing working directory] $ git clone -v -- https://github.com/buildkite/bash-example.git .
-[2025-04-22 21:43:30.349] [~~~ Preparing working directory] $ git clean -ffxdq
-...
-
---- Command Query Statistics (Streaming) ---
-Total entries: 212
-Total commands: 15
-Query time: 1.08 ms
-```
-
-**List first 5 commands in JSON format:**
-```bash
-./build/bklog query -file output.parquet -op list-commands -format json -limit 5
-```
-
-**List commands without statistics:**
-```bash
-./build/bklog query -file output.parquet -op list-commands -stats=false
-```
 
 **Filter entries by group pattern:**
 ```bash
@@ -345,22 +329,22 @@ Matches found: 2
 
 **Case-sensitive search:**
 ```bash
-./build/bklog query -file output.parquet -op search -pattern "ERROR" --case-sensitive
+./build/bklog query -file output.parquet -op search -pattern "ERROR" -case-sensitive
 ```
 
 **Invert match (show non-matching lines):**
 ```bash
-./build/bklog query -file output.parquet -op search -pattern "buildkite" --invert-match -limit 5
+./build/bklog query -file output.parquet -op search -pattern "buildkite" -invert-match -limit 5
 ```
 
 **Reverse search (find recent errors first):**
 ```bash
-./build/bklog query -file output.parquet -op search -pattern "error|failed" --reverse -C 2
+./build/bklog query -file output.parquet -op search -pattern "error|failed" -reverse -C 2
 ```
 
 **Reverse search from specific position:**
 ```bash
-./build/bklog query -file output.parquet -op search -pattern "test.*failed" --reverse --search-seek 1000
+./build/bklog query -file output.parquet -op search -pattern "test.*failed" -reverse -search-seek 1000
 ```
 
 **Search with JSON output:**
@@ -413,6 +397,16 @@ Matches found: 2
 ./build/bklog query -file output.parquet -op dump -format json
 ```
 
+**Dump entries with raw output (no timestamps/groups):**
+```bash
+./build/bklog query -file output.parquet -op dump -raw
+```
+
+**Dump entries with ANSI codes stripped:**
+```bash
+./build/bklog query -file output.parquet -op dump -strip-ansi
+```
+
 #### Buildkite API Integration
 
 The query command now supports direct API integration, automatically downloading and caching logs from Buildkite:
@@ -423,11 +417,7 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-groups
 ```
 
-**Query logs directly from Buildkite API:**
-```bash
-export BUILDKITE_API_TOKEN="bkua_your_token_here"
-./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-commands
-```
+
 
 **Query specific group from API logs:**
 ```bash
@@ -444,13 +434,13 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 **Search API logs with case sensitivity:**
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
-./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "ERROR" --case-sensitive
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "ERROR" -case-sensitive
 ```
 
 **Reverse search API logs (find recent failures):**
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
-./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "test.*failed" --reverse -C 2
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op search -pattern "test.*failed" -reverse -C 2
 ```
 
 **Query last 10 entries from API logs:**
@@ -469,6 +459,24 @@ export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ```bash
 export BUILDKITE_API_TOKEN="bkua_your_token_here"
 ./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op dump
+```
+
+**Query with custom cache TTL:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op info -cache-ttl=5m
+```
+
+**Force refresh cached logs:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op list-groups -cache-force-refresh
+```
+
+**Use custom cache location:**
+```bash
+export BUILDKITE_API_TOKEN="bkua_your_token_here"
+./build/bklog query -org myorg -pipeline mypipeline -build 123 -job abc-def-456 -op info -cache-url=file:///tmp/bklogs
 ```
 
 Logs are automatically downloaded and cached in `~/.bklog/` as `{org}-{pipeline}-{build}-{job}.parquet` files. Subsequent queries use the cached version unless the cache is manually cleared.
@@ -588,7 +596,16 @@ The debug command is particularly useful for investigating issues where the pars
 
 # 4. Compare multiple lines to understand patterns
 ./build/bklog debug -file buildkite.log -start 140 -end 145 -raw
+
+# 5. Extract all timestamps to CSV for analysis
+./build/bklog debug -file buildkite.log -mode extract-timestamps -csv timestamps.csv
 ```
+
+**Extract all OSC timestamps to CSV:**
+```bash
+./build/bklog debug -file buildkite.log -mode extract-timestamps -csv timestamps.csv
+```
+This extracts all OSC sequence timestamps from the log file into a CSV file with columns: line_number, osc_offset, timestamp_ms, timestamp_formatted.
 
 #### Real Examples Using Test Data
 
@@ -658,11 +675,11 @@ Output:
 
 **Output Options:**
 - `-json`: Output as JSON instead of text
-- `-strip-ansi`: Remove ANSI escape sequences from output
-- `-filter <type>`: Filter entries by type (`command`, `group`)
+- `-filter <type>`: Filter entries by type (`group`, `section`)
 - `-summary`: Show processing summary at the end
 - `-groups`: Show group/section information for each entry
 - `-parquet <path>`: Export to Parquet file (e.g., output.parquet)
+- `-jsonl <path>`: Export to JSON Lines file (e.g., output.jsonl)
 
 #### Query Command
 ```bash
@@ -679,13 +696,15 @@ Output:
 - `-job <id>`: Buildkite job ID (for API access)
 
 **Query Options:**
-- `-op <operation>`: Query operation (`list-groups`, `list-commands`, `by-group`, `search`, `info`, `tail`, `seek`, `dump`) (default: `list-groups`)
+- `-op <operation>`: Query operation (`list-groups`, `by-group`, `search`, `info`, `tail`, `seek`, `dump`) (default: `list-groups`)
 - `-group <pattern>`: Group name pattern to filter by (for `by-group` operation)
 - `-format <format>`: Output format (`text`, `json`) (default: `text`)
 - `-stats`: Show query statistics (default: `true`)
 - `-limit <number>`: Limit number of entries returned (0 = no limit, enables early termination)
 - `-tail <number>`: Number of lines to show from end (for `tail` operation, default: 10)
 - `-seek <row>`: Row number to seek to (0-based, for `seek` operation)
+- `-raw`: Output raw log content without timestamps, groups, or other prefixes
+- `-strip-ansi`: Strip ANSI escape codes from log content
 
 **Search Options:**
 - `-pattern <regex>`: Regex pattern to search for (for `search` operation)
@@ -694,8 +713,13 @@ Output:
 - `-C <num>`: Show NUM lines before and after each match (ripgrep-style)
 - `-case-sensitive`: Enable case-sensitive search (default: case-insensitive)
 - `-invert-match`: Show non-matching lines instead of matching ones
-- `--reverse`: Search backwards from end/seek position (useful for finding recent errors first)
-- `--search-seek <row>`: Start search from this row number (0-based, useful with `--reverse`)
+- `-reverse`: Search backwards from end/seek position (useful for finding recent errors first)
+- `-search-seek <row>`: Start search from this row number (0-based, useful with `-reverse`)
+
+**Cache Options (API mode only):**
+- `-cache-ttl <duration>`: Cache TTL for non-terminal jobs (default: 30s)
+- `-cache-force-refresh`: Force refresh cached entry (ignores cache)
+- `-cache-url <url>`: Cache storage URL (file://path, s3://bucket, etc., default: ~/.bklog)
 
 #### Debug Command
 ```bash
@@ -711,15 +735,18 @@ Output:
 - `-limit <num>`: Number of lines to process (default: 10)
 
 **Mode Options:**
-- `-mode <mode>`: Debug mode: `parse`, `hex`, `lines` (default: `parse`)
+- `-mode <mode>`: Debug mode: `parse`, `hex`, `lines`, `extract-timestamps` (default: `parse`)
 
 **Display Options:**
 - `-verbose`: Show detailed parsing information (default: false)
 - `-raw`: Show raw line content (default: false)
 - `-hex`: Show hex dump of each line (default: false)
 - `-parsed`: Show parsed log entry (default: true)
+- `-csv <path>`: Output CSV file for extract-timestamps mode
 
 **Note:** For API usage, set `BUILDKITE_API_TOKEN` environment variable. Logs are automatically downloaded and cached in `~/.bklog/`.
+
+**Security:** Keep your Buildkite API token secure. Never commit tokens to version control or expose them in logs. Use environment variables or secure secret management systems.
 
 ## Log Entry Types
 
@@ -738,7 +765,7 @@ Headers that mark different phases of the build (collapsible in Buildkite UI):
 [2025-04-22 21:43:30.699] +++ :hammer: Example tests
 ```
 
-### Groups/Sections
+### Build Groups and Sections
 
 The parser automatically tracks which section or group each log entry belongs to:
 
@@ -756,7 +783,7 @@ Each entry is automatically associated with the most recent group header (`~~~`,
 
 ## Parquet Export
 
-The parser can export log entries to [Apache Parquet](https://parquet.apache.org/) format using the official [Apache Arrow Go](https://github.com/apache/arrow/tree/main/go) implementation for efficient storage and analysis:
+The parser can export log entries to [Apache Parquet](https://parquet.apache.org/) format using the official [Apache Arrow Go](https://github.com/apache/arrow/tree/main/go) implementation for efficient storage and analysis. Parquet files can be directly queried by tools like DuckDB, Apache Spark, and Pandas for powerful log analytics:
 
 ### Benefits of Parquet Format
 
@@ -772,9 +799,9 @@ The exported Parquet files contain the following columns:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `timestamp` | int64 | Unix timestamp in milliseconds |
-| `content` | string | Log content after OSC sequence |
-| `group` | string | Current build group/section |
+| `timestamp` | int64 | Unix timestamp in milliseconds since epoch |
+| `content` | string | Log content after OSC sequence processing |
+| `group` | string | Current build group/section name |
 | `flags` | int32 | Bitwise flags field (HasTimestamp=1, IsCommand=2, IsGroup=4) |
 
 ### Flags Field
@@ -834,7 +861,7 @@ func NewParser() *Parser
 // Parse a single log line
 func (p *Parser) ParseLine(line string) (*LogEntry, error)
 
-// Create Go 1.23+ iter.Seq2 iterator with proper error handling (streaming approach)
+// Create iter.Seq2 iterator with proper error handling (streaming approach)
 func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error]
 
 // Strip ANSI escape sequences

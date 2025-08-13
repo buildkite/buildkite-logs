@@ -73,8 +73,8 @@ func handleQueryCommand() {
 
 		fmt.Printf("  %s query -file logs.parquet -op by-group -group \"Running tests\"\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"error|failed\" -C 3\n", os.Args[0])
-		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"test.*failed\" --reverse -C 2\n", os.Args[0])
-		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"setup\" --reverse --search-seek 1000\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"test.*failed\" -reverse -C 2\n", os.Args[0])
+		fmt.Printf("  %s query -file logs.parquet -op search -pattern \"setup\" -reverse -search-seek 1000\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op info\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op tail -tail 20\n", os.Args[0])
 		fmt.Printf("  %s query -file logs.parquet -op seek -seek 1000 -limit 50\n", os.Args[0])

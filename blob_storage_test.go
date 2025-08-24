@@ -3,7 +3,6 @@ package buildkitelogs
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -105,63 +104,4 @@ func TestIsContainerizedEnvironment(t *testing.T) {
 
 	// Should return a boolean without error
 	_ = isContainer
-}
-
-func TestBlobStorageFileURLParsing(t *testing.T) {
-	ctx := context.Background()
-
-	// Test different file URL formats
-	testCases := []struct {
-		name       string
-		storageURL string
-		shouldWork bool
-	}{
-		{
-			name:       "absolute_path",
-			storageURL: "file:///tmp/test-cache",
-			shouldWork: true,
-		},
-		{
-			name:       "relative_to_home",
-			storageURL: "file://~/.test-cache",
-			shouldWork: true,
-		},
-		{
-			name:       "empty_url_uses_default",
-			storageURL: "",
-			shouldWork: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a unique temp directory for this test
-			tempDir, err := os.MkdirTemp("", "bklog-url-test-*")
-			if err != nil {
-				t.Fatalf("Failed to create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tempDir)
-
-			// For file paths, replace with temp directory
-			storageURL := tc.storageURL
-			switch storageURL {
-			case "file:///tmp/test-cache":
-				storageURL = "file://" + filepath.Join(tempDir, "test-cache")
-			case "file://~/.test-cache":
-				storageURL = "file://" + filepath.Join(tempDir, ".test-cache")
-			}
-
-			blobStorage, err := NewBlobStorage(ctx, storageURL)
-
-			if tc.shouldWork {
-				if err != nil {
-					t.Fatalf("Expected storage creation to succeed, got error: %v", err)
-				}
-				defer blobStorage.Close()
-			} else if err == nil {
-				blobStorage.Close()
-				t.Fatal("Expected storage creation to fail, but it succeeded")
-			}
-		})
-	}
 }

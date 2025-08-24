@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
 	"gocloud.dev/blob"
-	"gocloud.dev/blob/fileblob"
+	_ "gocloud.dev/blob/fileblob"
+	_ "gocloud.dev/blob/s3blob"
 )
 
 // BlobStorage provides an abstraction over blob storage backends
@@ -35,35 +35,6 @@ type BlobMetadata struct {
 func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error) {
 	if storageURL == "" {
 		storageURL = GetDefaultStorageURL()
-	}
-
-	// For file:// URLs, extract the path and create a fileblob bucket
-	if len(storageURL) >= 7 && storageURL[:7] == "file://" {
-		path := storageURL[7:] // Remove "file://" prefix
-
-		// Expand home directory if needed
-		if len(path) > 0 && path[0] == '~' {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get user home directory: %w", err)
-			}
-			path = filepath.Join(homeDir, path[1:])
-		}
-
-		// Create directory if it doesn't exist
-		if err := os.MkdirAll(path, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create storage directory %s: %w", path, err)
-		}
-
-		bucket, err := fileblob.OpenBucket(path, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open file blob bucket at %s: %w", path, err)
-		}
-
-		return &BlobStorage{
-			bucket: bucket,
-			ctx:    ctx,
-		}, nil
 	}
 
 	// For other URLs (s3://, gcs://, etc.), use blob.OpenBucket

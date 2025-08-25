@@ -150,12 +150,12 @@ type CustomBuildkiteAPI struct {
 	// Your custom implementation fields
 }
 
-func (c *CustomBuildkiteAPI) GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error) {
+func (c *CustomBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
 	// Your custom log fetching logic
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (c *CustomBuildkiteAPI) GetJobStatus(org, pipeline, build, job string) (*buildkitelogs.JobStatus, error) {
+func (c *CustomBuildkiteAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*buildkitelogs.JobStatus, error) {
 	// Your custom job status logic
 	return nil, fmt.Errorf("not implemented")
 }

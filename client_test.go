@@ -17,11 +17,11 @@ type MockBuildkiteAPI struct {
 	jobStatus  *JobStatus
 }
 
-func (m *MockBuildkiteAPI) GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error) {
+func (m *MockBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader(m.logContent)), nil
 }
 
-func (m *MockBuildkiteAPI) GetJobStatus(org, pipeline, build, job string) (*JobStatus, error) {
+func (m *MockBuildkiteAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error) {
 	return m.jobStatus, nil
 }
 

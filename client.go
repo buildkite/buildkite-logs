@@ -211,7 +211,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 
 	// Get job status to determine caching strategy
 	jobStatusStart := time.Now()
-	jobStatus, err := c.api.GetJobStatus(org, pipeline, build, job)
+	jobStatus, err := c.api.GetJobStatus(context.TODO(), org, pipeline, build, job)
 	jobStatusDuration := time.Since(jobStatusStart)
 
 	// Call after job status hooks
@@ -252,7 +252,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 
 	// Download fresh logs from API
 	logDownloadStart := time.Now()
-	logReader, err := c.api.GetJobLog(org, pipeline, build, job)
+	logReader, err := c.api.GetJobLog(context.TODO(), org, pipeline, build, job)
 	logDownloadDuration := time.Since(logDownloadStart)
 
 	var logSize int64

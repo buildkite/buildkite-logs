@@ -71,7 +71,7 @@ func IsTerminalState(state JobState) bool {
 }
 
 // GetJobStatus retrieves the current status of a Buildkite job with retry logic
-func GetJobStatus(client *buildkite.Client, org, pipeline, build, jobID string) (*JobStatus, error) {
+func GetJobStatus(client *buildkite.Client, ctx context.Context, org, pipeline, build, jobID string) (*JobStatus, error) {
 	var buildInfo buildkite.Build
 	var err error
 
@@ -82,9 +82,6 @@ func GetJobStatus(client *buildkite.Client, org, pipeline, build, jobID string) 
 	bo.MaxInterval = 10 * time.Second    // Max interval between retries
 
 	operation := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
 		buildInfo, _, err = client.Builds.Get(ctx, org, pipeline, build, nil)
 		if err != nil {
 			return fmt.Errorf("failed to get build info: %w", err)

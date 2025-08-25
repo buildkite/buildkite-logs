@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -111,7 +112,7 @@ func runParse(config *Config) error {
 		}
 
 		client := buildkitelogs.NewBuildkiteAPIClient(apiToken, version)
-		logReader, err := client.GetJobLog(config.Organization, config.Pipeline, config.Build, config.Job)
+		logReader, err := client.GetJobLog(context.Background(), config.Organization, config.Pipeline, config.Build, config.Job)
 		if err != nil {
 			return fmt.Errorf("failed to fetch logs from API: %w", err)
 		}

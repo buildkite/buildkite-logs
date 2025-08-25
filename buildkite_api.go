@@ -14,12 +14,12 @@ import (
 
 // JobStatusProvider defines the interface for getting job status
 type JobStatusProvider interface {
-	GetJobStatus(org, pipeline, build, job string) (*JobStatus, error)
+	GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error)
 }
 
 // LogProvider defines the interface for getting job logs
 type LogProvider interface {
-	GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error)
+	GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error)
 }
 
 // BuildkiteAPI combines both job status and log providers
@@ -65,10 +65,7 @@ func NewBuildkiteAPIExistingClient(client *buildkite.Client) *BuildkiteAPIClient
 // pipeline: pipeline slug
 // build: build number or UUID
 // job: job ID
-func (c *BuildkiteAPIClient) GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
+func (c *BuildkiteAPIClient) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
 	jobLog, _, err := c.client.Jobs.GetJobLog(ctx, org, pipeline, build, job)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get job log: %w", err)
@@ -79,8 +76,8 @@ func (c *BuildkiteAPIClient) GetJobLog(org, pipeline, build, job string) (io.Rea
 }
 
 // GetJobStatus gets the current status of a job with retry logic
-func (c *BuildkiteAPIClient) GetJobStatus(org, pipeline, build, job string) (*JobStatus, error) {
-	return GetJobStatus(c.client, org, pipeline, build, job)
+func (c *BuildkiteAPIClient) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error) {
+	return GetJobStatus(c.client, ctx, org, pipeline, build, job)
 }
 
 // ValidateAPIParams validates that all required API parameters are provided

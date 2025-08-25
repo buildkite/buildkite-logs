@@ -68,15 +68,15 @@ func main() {
     // Create buildkite client
     client, _ := buildkite.NewOpts(buildkite.WithTokenAuth("your-token"))
     
+	ctx := context.Background()
+
     // Create high-level Client
-    buildkiteLogsClient, err := buildkitelogs.NewClient(client, "file://~/.bklog")
+    buildkiteLogsClient, err := buildkitelogs.NewClient(ctx, client, "file://~/.bklog")
     if err != nil {
         panic(err)
     }
     defer buildkiteLogsClient.Close()
-    
-    ctx := context.Background()
-    
+        
     // Download, cache, and get a reader in one step
     reader, err := buildkiteLogsClient.NewReader(
         ctx, "myorg", "mypipeline", "123", "job-id",

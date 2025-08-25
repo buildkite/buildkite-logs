@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,15 @@ func (m *MockBuildkiteAPI) GetJobStatus(org, pipeline, build, job string) (*JobS
 func TestParquetClient_NewParquetClient(t *testing.T) {
 	// Create a mock buildkite client
 	client, _ := buildkite.NewOpts()
-	storageURL := "file://./test-cache"
+
+	// create the temp directory
+	tempDir, err := os.MkdirTemp("", "bklog-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	storageURL := "file://" + tempDir
 
 	parquetClient, err := NewClient(client, storageURL)
 	if err != nil {
@@ -53,7 +62,15 @@ func TestParquetClient_NewParquetClientWithAPI(t *testing.T) {
 			IsTerminal: true,
 		},
 	}
-	storageURL := "file://./test-cache"
+
+	// create the temp directory
+	tempDir, err := os.MkdirTemp("", "bklog-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	storageURL := "file://" + tempDir
 
 	parquetClient, err := NewClientWithAPI(mockAPI, storageURL)
 	if err != nil {
@@ -84,7 +101,14 @@ func TestParquetClient_DownloadAndCache(t *testing.T) {
 		},
 	}
 
-	client, err := NewClientWithAPI(mockAPI, "file://./test-cache")
+	// create the temp directory
+	tempDir, err := os.MkdirTemp("", "bklog-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	client, err := NewClientWithAPI(mockAPI, "file://"+tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -111,7 +135,14 @@ func TestParquetClient_NewReader(t *testing.T) {
 		},
 	}
 
-	client, err := NewClientWithAPI(mockAPI, "file://./test-cache")
+	// make a temp directory for testing
+	tempDir, err := os.MkdirTemp("", "bklog-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	client, err := NewClientWithAPI(mockAPI, "file://"+tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}

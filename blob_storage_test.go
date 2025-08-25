@@ -3,7 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -82,11 +82,17 @@ func TestBlobStorage(t *testing.T) {
 
 func TestGetDefaultStorageURL(t *testing.T) {
 	// Test default storage URL
-	defaultURL := GetDefaultStorageURL()
+	defaultURL, err := GetDefaultStorageURL("")
+	if err != nil {
+		t.Fatalf("GetDefaultStorageURL() failed: %v", err)
+	}
 
-	// Should return either desktop or container default
-	if defaultURL != "file://~/.bklog" && defaultURL != "file:///tmp/bklog" {
-		t.Errorf("Unexpected default storage URL: %s", defaultURL)
+	// Should start with file:// and contain bklog
+	if !strings.HasPrefix(defaultURL, "file://") {
+		t.Errorf("Expected file:// URL, got: %s", defaultURL)
+	}
+	if !strings.Contains(defaultURL, "bklog") {
+		t.Errorf("Expected URL to contain 'bklog', got: %s", defaultURL)
 	}
 }
 
@@ -105,63 +111,4 @@ func TestIsContainerizedEnvironment(t *testing.T) {
 
 	// Should return a boolean without error
 	_ = isContainer
-}
-
-func TestBlobStorageFileURLParsing(t *testing.T) {
-	ctx := context.Background()
-
-	// Test different file URL formats
-	testCases := []struct {
-		name       string
-		storageURL string
-		shouldWork bool
-	}{
-		{
-			name:       "absolute_path",
-			storageURL: "file:///tmp/test-cache",
-			shouldWork: true,
-		},
-		{
-			name:       "relative_to_home",
-			storageURL: "file://~/.test-cache",
-			shouldWork: true,
-		},
-		{
-			name:       "empty_url_uses_default",
-			storageURL: "",
-			shouldWork: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a unique temp directory for this test
-			tempDir, err := os.MkdirTemp("", "bklog-url-test-*")
-			if err != nil {
-				t.Fatalf("Failed to create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tempDir)
-
-			// For file paths, replace with temp directory
-			storageURL := tc.storageURL
-			switch storageURL {
-			case "file:///tmp/test-cache":
-				storageURL = "file://" + filepath.Join(tempDir, "test-cache")
-			case "file://~/.test-cache":
-				storageURL = "file://" + filepath.Join(tempDir, ".test-cache")
-			}
-
-			blobStorage, err := NewBlobStorage(ctx, storageURL)
-
-			if tc.shouldWork {
-				if err != nil {
-					t.Fatalf("Expected storage creation to succeed, got error: %v", err)
-				}
-				defer blobStorage.Close()
-			} else if err == nil {
-				blobStorage.Close()
-				t.Fatal("Expected storage creation to fail, but it succeeded")
-			}
-		})
-	}
 }

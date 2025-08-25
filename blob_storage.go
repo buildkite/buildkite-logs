@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
 	"gocloud.dev/blob"
-	"gocloud.dev/blob/fileblob"
+	_ "gocloud.dev/blob/fileblob"
+	_ "gocloud.dev/blob/s3blob"
 )
 
 // BlobStorage provides an abstraction over blob storage backends
@@ -33,37 +33,9 @@ type BlobMetadata struct {
 // NewBlobStorage creates a new blob storage instance from a storage URL
 // Supports file:// URLs for local filesystem storage
 func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error) {
-	if storageURL == "" {
-		storageURL = GetDefaultStorageURL()
-	}
-
-	// For file:// URLs, extract the path and create a fileblob bucket
-	if len(storageURL) >= 7 && storageURL[:7] == "file://" {
-		path := storageURL[7:] // Remove "file://" prefix
-
-		// Expand home directory if needed
-		if len(path) > 0 && path[0] == '~' {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get user home directory: %w", err)
-			}
-			path = filepath.Join(homeDir, path[1:])
-		}
-
-		// Create directory if it doesn't exist
-		if err := os.MkdirAll(path, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create storage directory %s: %w", path, err)
-		}
-
-		bucket, err := fileblob.OpenBucket(path, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open file blob bucket at %s: %w", path, err)
-		}
-
-		return &BlobStorage{
-			bucket: bucket,
-			ctx:    ctx,
-		}, nil
+	storageURL, err := GetDefaultStorageURL(storageURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default storage URL: %w", err)
 	}
 
 	// For other URLs (s3://, gcs://, etc.), use blob.OpenBucket
@@ -79,15 +51,36 @@ func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error
 }
 
 // GetDefaultStorageURL returns the default storage URL based on environment
-func GetDefaultStorageURL() string {
+func GetDefaultStorageURL(storageURL string) (string, error) {
+	// If a storage URL is provided, use it
+	if storageURL != "" {
+		return storageURL, nil
+	}
+
+	var dirPath string
+
 	// Check if we're in a containerized environment (Docker/Kubernetes)
 	if IsContainerizedEnvironment() {
 		tempDir := os.TempDir()
-		return fmt.Sprintf("file://%s/bklog", tempDir)
+		dirPath = fmt.Sprintf("%s/bklog", tempDir)
+	} else {
+		// Default to user's home directory for desktop usage
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			// Fallback to temp directory if home directory is unavailable
+			tempDir := os.TempDir()
+			dirPath = fmt.Sprintf("%s/bklog", tempDir)
+		} else {
+			dirPath = fmt.Sprintf("%s/.bklog", homeDir)
+		}
 	}
 
-	// Default to user's home directory for desktop usage
-	return "file://~/.bklog"
+	// Ensure the directory exists
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
+	}
+
+	return fmt.Sprintf("file://%s", dirPath), nil
 }
 
 // IsContainerizedEnvironment detects if we're running in a container

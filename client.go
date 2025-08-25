@@ -110,15 +110,14 @@ type Client struct {
 }
 
 // NewClient creates a new Client using the provided go-buildkite client
-func NewClient(client *buildkite.Client, storageURL string) (*Client, error) {
+func NewClient(ctx context.Context, client *buildkite.Client, storageURL string) (*Client, error) {
 	api := NewBuildkiteAPIExistingClient(client)
-	return NewClientWithAPI(api, storageURL)
+	return NewClientWithAPI(ctx, api, storageURL)
 }
 
 // NewClientWithAPI creates a new Client using a custom BuildkiteAPI implementation
-func NewClientWithAPI(api BuildkiteAPI, storageURL string) (*Client, error) {
+func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string) (*Client, error) {
 	// Initialize blob storage once during client creation
-	ctx := context.Background()
 	blobStorage, err := NewBlobStorage(ctx, storageURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize blob storage: %w", err)
@@ -211,7 +210,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 
 	// Get job status to determine caching strategy
 	jobStatusStart := time.Now()
-	jobStatus, err := c.api.GetJobStatus(context.TODO(), org, pipeline, build, job)
+	jobStatus, err := c.api.GetJobStatus(ctx, org, pipeline, build, job)
 	jobStatusDuration := time.Since(jobStatusStart)
 
 	// Call after job status hooks
@@ -252,7 +251,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 
 	// Download fresh logs from API
 	logDownloadStart := time.Now()
-	logReader, err := c.api.GetJobLog(context.TODO(), org, pipeline, build, job)
+	logReader, err := c.api.GetJobLog(ctx, org, pipeline, build, job)
 	logDownloadDuration := time.Since(logDownloadStart)
 
 	var logSize int64

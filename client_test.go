@@ -38,7 +38,7 @@ func TestParquetClient_NewParquetClient(t *testing.T) {
 
 	storageURL := "file://" + tempDir
 
-	parquetClient, err := NewClient(client, storageURL)
+	parquetClient, err := NewClient(context.TODO(), client, storageURL)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestParquetClient_NewParquetClientWithAPI(t *testing.T) {
 
 	storageURL := "file://" + tempDir
 
-	parquetClient, err := NewClientWithAPI(mockAPI, storageURL)
+	parquetClient, err := NewClientWithAPI(context.TODO(), mockAPI, storageURL)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestParquetClient_DownloadAndCache(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	client, err := NewClientWithAPI(mockAPI, "file://"+tempDir)
+	client, err := NewClientWithAPI(context.TODO(), mockAPI, "file://"+tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestParquetClient_NewReader(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	client, err := NewClientWithAPI(mockAPI, "file://"+tempDir)
+	client, err := NewClientWithAPI(context.TODO(), mockAPI, "file://"+tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}

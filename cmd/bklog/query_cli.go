@@ -119,7 +119,9 @@ func handleQueryCommand() {
 		}
 	}
 
-	if err := runQuery(&config); err != nil {
+	ctx := context.Background()
+
+	if err := runQuery(ctx, &config); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -280,9 +282,9 @@ type QueryConfig struct {
 }
 
 // runQuery executes a query using streaming iterators
-func runQuery(config *QueryConfig) error {
+func runQuery(ctx context.Context, config *QueryConfig) error {
 	// Resolve the parquet file path
-	parquetFile, err := resolveParquetFilePath(config)
+	parquetFile, err := resolveParquetFilePath(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -292,7 +294,7 @@ func runQuery(config *QueryConfig) error {
 }
 
 // resolveParquetFilePath determines the parquet file path to use
-func resolveParquetFilePath(config *QueryConfig) (string, error) {
+func resolveParquetFilePath(ctx context.Context, config *QueryConfig) (string, error) {
 	// If file path is provided directly, use it
 	if config.ParquetFile != "" {
 		return config.ParquetFile, nil
@@ -307,12 +309,11 @@ func resolveParquetFilePath(config *QueryConfig) (string, error) {
 
 		// Create buildkite client and high-level client
 		buildkiteClient := buildkitelogs.NewBuildkiteAPIClient(apiToken, version)
-		client, err := buildkitelogs.NewClientWithAPI(buildkiteClient, config.CacheURL)
+		client, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteClient, config.CacheURL)
 		if err != nil {
 			return "", fmt.Errorf("failed to create client: %w", err)
 		}
 		defer client.Close()
-		ctx := context.Background()
 
 		cacheFilePath, err := client.DownloadAndCache(ctx, config.Organization, config.Pipeline, config.Build, config.Job, config.CacheTTL, config.ForceRefresh)
 		if err != nil {

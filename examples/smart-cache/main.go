@@ -50,14 +50,15 @@ func main() {
 	fmt.Println("- Permanent cache for terminal jobs")
 	fmt.Println("- Auto storage backend selection")
 
+	ctx := context.Background()
+
 	// Create high-level client
 	buildkiteAPIClient := buildkitelogs.NewBuildkiteAPIClient(apiToken, *version)
-	client, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, "") // empty storageURL = auto-detect
+	client, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteAPIClient, "") // empty storageURL = auto-detect
 	if err != nil {
 		log.Fatal("Failed to create client:", err)
 	}
 	defer client.Close()
-	ctx := context.Background()
 
 	start := time.Now()
 	cacheFile1, err := client.DownloadAndCache(
@@ -116,7 +117,7 @@ func main() {
 
 	// Create client with custom storage URL
 	var cacheFile4 string
-	s3Client, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, s3URL)
+	s3Client, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteAPIClient, s3URL)
 	if err != nil {
 		log.Printf("Failed to create S3 client: %v", err)
 		fmt.Println("   → Falling back to local storage for demo")
@@ -136,7 +137,7 @@ func main() {
 		fmt.Println("   → Falling back to local storage for demo")
 
 		// Fallback to local storage
-		localClient, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, "file://./cache-demo")
+		localClient, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteAPIClient, "file://./cache-demo")
 		if err != nil {
 			log.Printf("Failed to create local client: %v", err)
 		} else {
@@ -175,7 +176,7 @@ func main() {
 		fmt.Printf("  %d. TTL: %s\n", i+1, ttlDesc)
 
 		// Create client with separate cache directory for each TTL
-		ttlClient, err := buildkitelogs.NewClientWithAPI(buildkiteAPIClient, fmt.Sprintf("file://./cache-ttl-%d", i))
+		ttlClient, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteAPIClient, fmt.Sprintf("file://./cache-ttl-%d", i))
 		if err != nil {
 			log.Printf("     Failed to create TTL client: %v", err)
 			continue

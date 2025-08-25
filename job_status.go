@@ -1,12 +1,7 @@
 package buildkitelogs
 
 import (
-	"context"
-	"fmt"
 	"time"
-
-	"github.com/buildkite/go-buildkite/v4"
-	"github.com/cenkalti/backoff/v4"
 )
 
 // JobState represents the possible states of a Buildkite job
@@ -68,70 +63,6 @@ var terminalStates = map[JobState]bool{
 // IsTerminalState returns true if the given job state is terminal
 func IsTerminalState(state JobState) bool {
 	return terminalStates[state]
-}
-
-// GetJobStatus retrieves the current status of a Buildkite job with retry logic
-func GetJobStatus(client *buildkite.Client, org, pipeline, build, jobID string) (*JobStatus, error) {
-	var buildInfo buildkite.Build
-	var err error
-
-	// Configure backoff for retries: max 3 retries, exponential backoff starting at 1s
-	bo := backoff.NewExponentialBackOff()
-	bo.InitialInterval = 1 * time.Second
-	bo.MaxElapsedTime = 30 * time.Second // Max total time to spend retrying
-	bo.MaxInterval = 10 * time.Second    // Max interval between retries
-
-	operation := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		buildInfo, _, err = client.Builds.Get(ctx, org, pipeline, build, nil)
-		if err != nil {
-			return fmt.Errorf("failed to get build info: %w", err)
-		}
-		return nil
-	}
-
-	if err := backoff.Retry(operation, bo); err != nil {
-		return nil, fmt.Errorf("failed to get build info after retries: %w", err)
-	}
-
-	// buildInfo is a struct, so no need to check for nil
-
-	// Find the specific job in the build
-	var job buildkite.Job
-	var jobFound bool
-	for _, j := range buildInfo.Jobs {
-		if j.ID == jobID {
-			job = j
-			jobFound = true
-			break
-		}
-	}
-
-	if !jobFound {
-		return nil, fmt.Errorf("job not found: %s", jobID)
-	}
-
-	// Convert buildkite job to our JobStatus
-	state := JobState(job.State)
-	status := &JobStatus{
-		ID:         job.ID,
-		State:      state,
-		IsTerminal: IsTerminalState(state),
-		WebURL:     job.WebURL,
-	}
-
-	if job.ExitStatus != nil {
-		status.ExitStatus = job.ExitStatus
-	}
-
-	if job.FinishedAt != nil {
-		finishedAt := job.FinishedAt.Time
-		status.FinishedAt = &finishedAt
-	}
-
-	return status, nil
 }
 
 // ShouldRefreshCache determines if a cached entry should be refreshed based on job status and TTL

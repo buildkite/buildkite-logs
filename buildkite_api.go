@@ -14,12 +14,12 @@ import (
 
 // JobStatusProvider defines the interface for getting job status
 type JobStatusProvider interface {
-	GetJobStatus(org, pipeline, build, job string) (*JobStatus, error)
+	GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error)
 }
 
 // LogProvider defines the interface for getting job logs
 type LogProvider interface {
-	GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error)
+	GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error)
 }
 
 // BuildkiteAPI combines both job status and log providers
@@ -65,10 +65,7 @@ func NewBuildkiteAPIExistingClient(client *buildkite.Client) *BuildkiteAPIClient
 // pipeline: pipeline slug
 // build: build number or UUID
 // job: job ID
-func (c *BuildkiteAPIClient) GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
+func (c *BuildkiteAPIClient) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
 	jobLog, _, err := c.client.Jobs.GetJobLog(ctx, org, pipeline, build, job)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get job log: %w", err)
@@ -78,9 +75,49 @@ func (c *BuildkiteAPIClient) GetJobLog(org, pipeline, build, job string) (io.Rea
 	return io.NopCloser(strings.NewReader(jobLog.Content)), nil
 }
 
-// GetJobStatus gets the current status of a job with retry logic
-func (c *BuildkiteAPIClient) GetJobStatus(org, pipeline, build, job string) (*JobStatus, error) {
-	return GetJobStatus(c.client, org, pipeline, build, job)
+// GetJobStatus gets the current status of a job
+func (c *BuildkiteAPIClient) GetJobStatus(ctx context.Context, org, pipeline, build, jobID string) (*JobStatus, error) {
+	buildInfo, _, err := c.client.Builds.Get(ctx, org, pipeline, build, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get build info: %w", err)
+	}
+
+	// buildInfo is a struct, so no need to check for nil
+
+	// Find the specific job in the build
+	var job buildkite.Job
+	var jobFound bool
+	for _, j := range buildInfo.Jobs {
+		if j.ID == jobID {
+			job = j
+			jobFound = true
+			break
+		}
+	}
+
+	if !jobFound {
+		return nil, fmt.Errorf("job not found: %s", jobID)
+	}
+
+	// Convert buildkite job to our JobStatus
+	state := JobState(job.State)
+	status := &JobStatus{
+		ID:         job.ID,
+		State:      state,
+		IsTerminal: IsTerminalState(state),
+		WebURL:     job.WebURL,
+	}
+
+	if job.ExitStatus != nil {
+		status.ExitStatus = job.ExitStatus
+	}
+
+	if job.FinishedAt != nil {
+		finishedAt := job.FinishedAt.Time
+		status.FinishedAt = &finishedAt
+	}
+
+	return status, nil
 }
 
 // ValidateAPIParams validates that all required API parameters are provided

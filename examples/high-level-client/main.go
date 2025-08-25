@@ -25,9 +25,11 @@ func main() {
 		log.Fatal("Failed to create buildkite client:", err)
 	}
 
+	ctx := context.Background()
+
 	// Create high-level Client
 	storageURL := "file://~/.bklog" // Uses default storage location
-	buildkiteLogsClient, err := buildkitelogs.NewClient(client, storageURL)
+	buildkiteLogsClient, err := buildkitelogs.NewClient(ctx, client, storageURL)
 	if err != nil {
 		log.Fatal("Failed to create buildkite logs client:", err)
 	}
@@ -65,7 +67,6 @@ func main() {
 			result.LocalPath, result.FileSize, result.Duration)
 	})
 
-	ctx := context.Background()
 	org := "myorg"
 	pipeline := "mypipeline"
 	build := "123"
@@ -114,7 +115,7 @@ func main() {
 	// Example 3: Using with custom API implementation
 	fmt.Println("\nExample with custom API:")
 	customAPI := &CustomBuildkiteAPI{} // Your custom implementation
-	customClient, err := buildkitelogs.NewClientWithAPI(customAPI, storageURL)
+	customClient, err := buildkitelogs.NewClientWithAPI(ctx, customAPI, storageURL)
 	if err != nil {
 		log.Printf("Failed to create custom client: %v", err)
 		return
@@ -150,12 +151,12 @@ type CustomBuildkiteAPI struct {
 	// Your custom implementation fields
 }
 
-func (c *CustomBuildkiteAPI) GetJobLog(org, pipeline, build, job string) (io.ReadCloser, error) {
+func (c *CustomBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
 	// Your custom log fetching logic
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (c *CustomBuildkiteAPI) GetJobStatus(org, pipeline, build, job string) (*buildkitelogs.JobStatus, error) {
+func (c *CustomBuildkiteAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*buildkitelogs.JobStatus, error) {
 	// Your custom job status logic
 	return nil, fmt.Errorf("not implemented")
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -77,13 +78,15 @@ func handleParseCommand() {
 		}
 	}
 
-	if err := runParse(&config); err != nil {
+	ctx := context.Background()
+
+	if err := runParse(ctx, &config); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func runParse(config *Config) error {
+func runParse(ctx context.Context, config *Config) error {
 	var reader io.ReadCloser
 	var bytesProcessed int64
 
@@ -111,7 +114,7 @@ func runParse(config *Config) error {
 		}
 
 		client := buildkitelogs.NewBuildkiteAPIClient(apiToken, version)
-		logReader, err := client.GetJobLog(config.Organization, config.Pipeline, config.Build, config.Job)
+		logReader, err := client.GetJobLog(ctx, config.Organization, config.Pipeline, config.Build, config.Job)
 		if err != nil {
 			return fmt.Errorf("failed to fetch logs from API: %w", err)
 		}

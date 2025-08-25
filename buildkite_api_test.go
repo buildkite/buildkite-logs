@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"context"
 	"testing"
 )
 
@@ -99,7 +100,7 @@ func TestValidateAPIParams(t *testing.T) {
 func TestGetJobLog_NoToken(t *testing.T) {
 	client := NewBuildkiteAPIClient("", "test")
 
-	_, err := client.GetJobLog("org", "pipeline", "build", "job")
+	_, err := client.GetJobLog(context.TODO(), "org", "pipeline", "build", "job")
 	if err == nil {
 		t.Error("Expected error when API token is empty")
 	}

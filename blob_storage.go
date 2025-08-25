@@ -180,6 +180,8 @@ func (bs *BlobStorage) ReadWithMetadata(ctx context.Context, key string) (*BlobM
 	return metadata, nil
 }
 
+// Reader returns an io.ReadCloser for streaming blob data from the specified key.
+// The caller is responsible for closing the returned reader when done.
 func (bs *BlobStorage) Reader(ctx context.Context, key string) (io.ReadCloser, error) {
 	return bs.bucket.NewReader(ctx, key, nil)
 }

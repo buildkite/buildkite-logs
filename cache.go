@@ -78,10 +78,5 @@ func createLocalCacheFile(ctx context.Context, blobStorage *BlobStorage, blobKey
 		return "", fmt.Errorf("failed to write local cache file: %w", err)
 	}
 
-	err = cacheFilePath.Close()
-	if err != nil {
-		return "", fmt.Errorf("failed to close cache file: %w", err)
-	}
-
 	return cacheFilePath.Name(), nil
 }

@@ -41,12 +41,8 @@ func main() {
 	})
 
 	buildkiteLogsClient.Hooks().AddAfterJobStatus(func(ctx context.Context, result *buildkitelogs.JobStatusResult) {
-		if result.Error != nil {
-			log.Printf("❌ Job status fetch failed in %v: %v", result.Duration, result.Error)
-		} else {
-			log.Printf("✅ Job status: %s (terminal: %t) - took %v",
-				result.JobStatus.State, result.JobStatus.IsTerminal, result.Duration)
-		}
+		log.Printf("✅ Job status: %s (terminal: %t) - took %v",
+			result.JobStatus.State, result.JobStatus.IsTerminal, result.Duration)
 	})
 
 	buildkiteLogsClient.Hooks().AddAfterLogDownload(func(ctx context.Context, result *buildkitelogs.LogDownloadResult) {

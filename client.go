@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -31,7 +32,6 @@ type Hooks struct {
 type BaseResult struct {
 	Org, Pipeline, Build, Job string
 	Duration                  time.Duration
-	Error                     error
 }
 
 // CacheCheckResult contains the result of checking blob storage cache
@@ -185,7 +185,11 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 
 	// Check if blob already exists
 	cacheCheckStart := time.Now()
-	exists, err := c.blobStorage.Exists(blobKey)
+	exists, err := c.blobStorage.Exists(ctx, blobKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to check blob existence: %w", err)
+	}
+
 	cacheCheckDuration := time.Since(cacheCheckStart)
 
 	// Call after cache check hooks
@@ -197,20 +201,19 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 				Build:    build,
 				Job:      job,
 				Duration: cacheCheckDuration,
-				Error:    err,
 			},
 			BlobKey: blobKey,
 			Exists:  exists,
 		})
 	}
 
-	if err != nil {
-		return "", fmt.Errorf("failed to check blob existence: %w", err)
-	}
-
 	// Get job status to determine caching strategy
 	jobStatusStart := time.Now()
 	jobStatus, err := c.api.GetJobStatus(ctx, org, pipeline, build, job)
+	if err != nil {
+		return "", fmt.Errorf("failed to get job status: %w", err)
+	}
+
 	jobStatusDuration := time.Since(jobStatusStart)
 
 	// Call after job status hooks
@@ -222,29 +225,24 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 				Build:    build,
 				Job:      job,
 				Duration: jobStatusDuration,
-				Error:    err,
 			},
 			JobStatus: jobStatus,
 		})
 	}
 
-	if err != nil {
-		return "", fmt.Errorf("failed to get job status: %w", err)
-	}
-
 	// Check if we should use existing cache
 	if exists && !forceRefresh {
-		_, metadata, err := c.blobStorage.ReadWithMetadata(blobKey)
+		metadata, err := c.blobStorage.ReadWithMetadata(ctx, blobKey)
 		if err == nil && metadata != nil {
 			// For terminal jobs, always use cache
 			if metadata.IsTerminal {
-				return createLocalCacheFile(ctx, c.blobStorage, blobKey, org, pipeline, build, job)
+				return createLocalCacheFile(ctx, c.blobStorage, blobKey)
 			}
 
 			// For non-terminal jobs, check TTL
 			timeElapsed := time.Since(metadata.CachedAt)
 			if timeElapsed < ttl {
-				return createLocalCacheFile(ctx, c.blobStorage, blobKey, org, pipeline, build, job)
+				return createLocalCacheFile(ctx, c.blobStorage, blobKey)
 			}
 		}
 	}
@@ -252,14 +250,17 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 	// Download fresh logs from API
 	logDownloadStart := time.Now()
 	logReader, err := c.api.GetJobLog(ctx, org, pipeline, build, job)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch logs from API: %w", err)
+	}
+	defer logReader.Close()
+
 	logDownloadDuration := time.Since(logDownloadStart)
 
 	var logSize int64
 	if logReader != nil {
 		// Get content length if available
-		if seeker, ok := logReader.(interface {
-			Seek(offset int64, whence int) (int64, error)
-		}); ok {
+		if seeker, ok := logReader.(io.Seeker); ok {
 			if size, seekErr := seeker.Seek(0, 2); seekErr == nil {
 				logSize = size
 				if _, resetErr := seeker.Seek(0, 0); resetErr != nil {
@@ -279,16 +280,10 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 				Build:    build,
 				Job:      job,
 				Duration: logDownloadDuration,
-				Error:    err,
 			},
 			LogSize: logSize,
 		})
 	}
-
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch logs from API: %w", err)
-	}
-	defer logReader.Close()
 
 	// Parse logs and convert to parquet data
 	logParsingStart := time.Now()
@@ -319,7 +314,6 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 					Build:    build,
 					Job:      job,
 					Duration: logParsingDuration,
-					Error:    err,
 				},
 				ParquetSize: 0,
 				LogEntries:  0,
@@ -328,8 +322,17 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 		return "", fmt.Errorf("failed to export logs to parquet: %w", err)
 	}
 
+	err = tempFile.Close()
+	if err != nil {
+		return "", fmt.Errorf("failed to close temp file: %w", err)
+	}
+
 	// Read the parquet data
 	parquetData, err = os.ReadFile(tempPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read parquet data: %w", err)
+	}
+
 	logParsingDuration := time.Since(logParsingStart)
 
 	// Call after log parsing hooks
@@ -341,15 +344,10 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 				Build:    build,
 				Job:      job,
 				Duration: logParsingDuration,
-				Error:    err,
 			},
 			ParquetSize: int64(len(parquetData)),
 			LogEntries:  0, // Consumer can count if needed
 		})
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("failed to read parquet data: %w", err)
 	}
 
 	// Store in blob storage with metadata
@@ -365,7 +363,11 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 		Build:        build,
 	}
 
-	err = c.blobStorage.WriteWithMetadata(blobKey, parquetData, metadata)
+	err = c.blobStorage.WriteWithMetadata(ctx, blobKey, parquetData, metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to write to blob storage: %w", err)
+	}
+
 	blobStorageDuration := time.Since(blobStorageStart)
 
 	// Call after blob storage hooks
@@ -377,7 +379,6 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 				Build:    build,
 				Job:      job,
 				Duration: blobStorageDuration,
-				Error:    err,
 			},
 			BlobKey:    blobKey,
 			DataSize:   int64(len(parquetData)),
@@ -386,20 +387,18 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 		})
 	}
 
-	if err != nil {
-		return "", fmt.Errorf("failed to write to blob storage: %w", err)
-	}
-
 	// Create local cache file
 	localCacheStart := time.Now()
-	localPath, err := createLocalCacheFile(ctx, c.blobStorage, blobKey, org, pipeline, build, job)
+	localPath, err := createLocalCacheFile(ctx, c.blobStorage, blobKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create local cache file: %w", err)
+	}
+
 	localCacheDuration := time.Since(localCacheStart)
 
 	var fileSize int64
-	if err == nil {
-		if stat, statErr := os.Stat(localPath); statErr == nil {
-			fileSize = stat.Size()
-		}
+	if stat, statErr := os.Stat(localPath); statErr == nil {
+		fileSize = stat.Size()
 	}
 
 	// Call after local cache hooks
@@ -411,14 +410,13 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 				Build:    build,
 				Job:      job,
 				Duration: localCacheDuration,
-				Error:    err,
 			},
 			LocalPath: localPath,
 			FileSize:  fileSize,
 		})
 	}
 
-	return localPath, err
+	return localPath, nil
 }
 
 // Close closes the underlying blob storage connection

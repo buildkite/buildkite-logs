@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -57,24 +58,25 @@ func IsCacheFileExists(org, pipeline, build, job string) (bool, string, error) {
 }
 
 // createLocalCacheFile creates a local file from blob storage for compatibility
-func createLocalCacheFile(ctx context.Context, blobStorage *BlobStorage, blobKey, org, pipeline, build, job string) (string, error) {
-	// Get local cache file path for compatibility
-	cacheFilePath, err := GetCacheFilePath(org, pipeline, build, job)
+func createLocalCacheFile(ctx context.Context, blobStorage *BlobStorage, blobKey string) (string, error) {
+	cacheFilePath, err := os.CreateTemp("", "bklog-")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create local cache file: %w", err)
 	}
+	defer cacheFilePath.Close()
 
 	// Read from blob storage
-	data, _, err := blobStorage.ReadWithMetadata(blobKey)
+	reader, err := blobStorage.Reader(ctx, blobKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to read from blob storage: %w", err)
 	}
+	defer reader.Close()
 
 	// Write to local cache file
-	err = os.WriteFile(cacheFilePath, data, 0600)
+	_, err = io.Copy(cacheFilePath, reader)
 	if err != nil {
 		return "", fmt.Errorf("failed to write local cache file: %w", err)
 	}
 
-	return cacheFilePath, nil
+	return cacheFilePath.Name(), nil
 }

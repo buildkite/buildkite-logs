@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"time"
@@ -15,7 +16,6 @@ import (
 // BlobStorage provides an abstraction over blob storage backends
 type BlobStorage struct {
 	bucket *blob.Bucket
-	ctx    context.Context
 }
 
 // BlobMetadata contains metadata for cached blobs
@@ -46,7 +46,6 @@ func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error
 
 	return &BlobStorage{
 		bucket: bucket,
-		ctx:    ctx,
 	}, nil
 }
 
@@ -115,12 +114,12 @@ func GenerateBlobKey(org, pipeline, build, job string) string {
 }
 
 // Exists checks if a blob exists in storage
-func (bs *BlobStorage) Exists(key string) (bool, error) {
-	return bs.bucket.Exists(bs.ctx, key)
+func (bs *BlobStorage) Exists(ctx context.Context, key string) (bool, error) {
+	return bs.bucket.Exists(ctx, key)
 }
 
 // WriteWithMetadata writes data to blob storage with metadata
-func (bs *BlobStorage) WriteWithMetadata(key string, data []byte, metadata *BlobMetadata) error {
+func (bs *BlobStorage) WriteWithMetadata(ctx context.Context, key string, data []byte, metadata *BlobMetadata) error {
 	opts := &blob.WriterOptions{}
 
 	if metadata != nil {
@@ -136,7 +135,7 @@ func (bs *BlobStorage) WriteWithMetadata(key string, data []byte, metadata *Blob
 		}
 	}
 
-	writer, err := bs.bucket.NewWriter(bs.ctx, key, opts)
+	writer, err := bs.bucket.NewWriter(ctx, key, opts)
 	if err != nil {
 		return fmt.Errorf("failed to create blob writer: %w", err)
 	}
@@ -150,23 +149,11 @@ func (bs *BlobStorage) WriteWithMetadata(key string, data []byte, metadata *Blob
 }
 
 // ReadWithMetadata reads data from blob storage with metadata
-func (bs *BlobStorage) ReadWithMetadata(key string) ([]byte, *BlobMetadata, error) {
-	reader, err := bs.bucket.NewReader(bs.ctx, key, nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create blob reader: %w", err)
-	}
-	defer reader.Close()
-
-	// Read data
-	data := make([]byte, reader.Size())
-	if _, err := reader.Read(data); err != nil {
-		return nil, nil, fmt.Errorf("failed to read blob data: %w", err)
-	}
-
+func (bs *BlobStorage) ReadWithMetadata(ctx context.Context, key string) (*BlobMetadata, error) {
 	// Get blob attributes for metadata
-	attrs, err := bs.bucket.Attributes(bs.ctx, key)
+	attrs, err := bs.bucket.Attributes(ctx, key)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get blob attributes: %w", err)
+		return nil, fmt.Errorf("failed to get blob attributes: %w", err)
 	}
 
 	// Extract metadata
@@ -190,12 +177,18 @@ func (bs *BlobStorage) ReadWithMetadata(key string) ([]byte, *BlobMetadata, erro
 		}
 	}
 
-	return data, metadata, nil
+	return metadata, nil
+}
+
+// Reader returns an io.ReadCloser for streaming blob data from the specified key.
+// The caller is responsible for closing the returned reader when done.
+func (bs *BlobStorage) Reader(ctx context.Context, key string) (io.ReadCloser, error) {
+	return bs.bucket.NewReader(ctx, key, nil)
 }
 
 // GetModTime returns the modification time of a blob
-func (bs *BlobStorage) GetModTime(key string) (time.Time, error) {
-	attrs, err := bs.bucket.Attributes(bs.ctx, key)
+func (bs *BlobStorage) GetModTime(ctx context.Context, key string) (time.Time, error) {
+	attrs, err := bs.bucket.Attributes(ctx, key)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get blob attributes: %w", err)
 	}
@@ -203,8 +196,8 @@ func (bs *BlobStorage) GetModTime(key string) (time.Time, error) {
 }
 
 // Delete removes a blob from storage
-func (bs *BlobStorage) Delete(key string) error {
-	return bs.bucket.Delete(bs.ctx, key)
+func (bs *BlobStorage) Delete(ctx context.Context, key string) error {
+	return bs.bucket.Delete(ctx, key)
 }
 
 // Close closes the blob storage connection

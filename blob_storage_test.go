@@ -43,13 +43,13 @@ func TestBlobStorage(t *testing.T) {
 	}
 
 	// Test write
-	err = blobStorage.WriteWithMetadata(key, testData, metadata)
+	err = blobStorage.WriteWithMetadata(ctx, key, testData, metadata)
 	if err != nil {
 		t.Fatalf("Failed to write blob: %v", err)
 	}
 
 	// Test exists
-	exists, err := blobStorage.Exists(key)
+	exists, err := blobStorage.Exists(ctx, key)
 	if err != nil {
 		t.Fatalf("Failed to check blob existence: %v", err)
 	}
@@ -58,13 +58,9 @@ func TestBlobStorage(t *testing.T) {
 	}
 
 	// Test read
-	readData, readMetadata, err := blobStorage.ReadWithMetadata(key)
+	readMetadata, err := blobStorage.ReadWithMetadata(ctx, key)
 	if err != nil {
 		t.Fatalf("Failed to read blob: %v", err)
-	}
-
-	if string(readData) != string(testData) {
-		t.Errorf("Expected data %s, got %s", string(testData), string(readData))
 	}
 
 	if readMetadata == nil {

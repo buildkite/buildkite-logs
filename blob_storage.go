@@ -33,8 +33,9 @@ type BlobMetadata struct {
 // NewBlobStorage creates a new blob storage instance from a storage URL
 // Supports file:// URLs for local filesystem storage
 func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error) {
-	if storageURL == "" {
-		storageURL = GetDefaultStorageURL()
+	storageURL, err := GetDefaultStorageURL(storageURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default storage URL: %w", err)
 	}
 
 	// For other URLs (s3://, gcs://, etc.), use blob.OpenBucket
@@ -50,15 +51,36 @@ func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error
 }
 
 // GetDefaultStorageURL returns the default storage URL based on environment
-func GetDefaultStorageURL() string {
+func GetDefaultStorageURL(storageURL string) (string, error) {
+	// If a storage URL is provided, use it
+	if storageURL != "" {
+		return storageURL, nil
+	}
+
+	var dirPath string
+
 	// Check if we're in a containerized environment (Docker/Kubernetes)
 	if IsContainerizedEnvironment() {
 		tempDir := os.TempDir()
-		return fmt.Sprintf("file://%s/bklog", tempDir)
+		dirPath = fmt.Sprintf("%s/bklog", tempDir)
+	} else {
+		// Default to user's home directory for desktop usage
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			// Fallback to temp directory if home directory is unavailable
+			tempDir := os.TempDir()
+			dirPath = fmt.Sprintf("%s/bklog", tempDir)
+		} else {
+			dirPath = fmt.Sprintf("%s/.bklog", homeDir)
+		}
 	}
 
-	// Default to user's home directory for desktop usage
-	return "file://~/.bklog"
+	// Ensure the directory exists
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
+	}
+
+	return fmt.Sprintf("file://%s", dirPath), nil
 }
 
 // IsContainerizedEnvironment detects if we're running in a container

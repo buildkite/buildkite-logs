@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -81,11 +82,17 @@ func TestBlobStorage(t *testing.T) {
 
 func TestGetDefaultStorageURL(t *testing.T) {
 	// Test default storage URL
-	defaultURL := GetDefaultStorageURL()
+	defaultURL, err := GetDefaultStorageURL("")
+	if err != nil {
+		t.Fatalf("GetDefaultStorageURL() failed: %v", err)
+	}
 
-	// Should return either desktop or container default
-	if defaultURL != "file://~/.bklog" && defaultURL != "file:///tmp/bklog" {
-		t.Errorf("Unexpected default storage URL: %s", defaultURL)
+	// Should start with file:// and contain bklog
+	if !strings.HasPrefix(defaultURL, "file://") {
+		t.Errorf("Expected file:// URL, got: %s", defaultURL)
+	}
+	if !strings.Contains(defaultURL, "bklog") {
+		t.Errorf("Expected URL to contain 'bklog', got: %s", defaultURL)
 	}
 }
 

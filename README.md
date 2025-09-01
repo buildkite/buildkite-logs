@@ -29,10 +29,10 @@ The library automatically downloads logs from the Buildkite API, caches them loc
 ## Features
 
 ### Primary: High-Level Client API
-- **Intelligent Caching**: Automatic download and caching of Buildkite logs with TTL support
+- **Intelligent Caching**: Automatic download and caching of Buildkite logs with Time To Live (TTL) support
 - **Fast Search & Query**: Built-in search capabilities with regex patterns, filtering, and context
 - **Buildkite API Integration**: Direct fetching from Buildkite jobs via REST API with authentication
-- **Parquet Storage**: Efficient columnar storage for fast analytics and data processing
+- **Parquet Storage**: Efficient columnar storage for fast analytics and data processing using [Apache Arrow](https://arrow.apache.org/).
 - **Streaming Processing**: Memory-efficient processing of logs of any size using Go iterators
 - **Observability Hooks**: Optional hooks for tracing and logging without framework coupling
 
@@ -784,6 +784,47 @@ Each entry is automatically associated with the most recent group header (`~~~`,
 ## Parquet Export
 
 The parser can export log entries to [Apache Parquet](https://parquet.apache.org/) format using the official [Apache Arrow Go](https://github.com/apache/arrow/tree/main/go) implementation for efficient storage and analysis. Parquet files can be directly queried by tools like DuckDB, Apache Spark, and Pandas for powerful log analytics:
+
+### Intelligent Caching System
+
+The library uses a two-tier intelligent caching strategy that optimizes for both performance and data freshness:
+
+```mermaid
+flowchart TD
+    A[Start: DownloadAndCache] --> B[Check blob storage cache]
+    B --> C{Cache exists?}
+    C -->|No| H[Download logs from API]
+    C -->|Yes| D{Force refresh?}
+    D -->|Yes| H
+    D -->|No| E[Get job status]
+    E --> F{Job is terminal?}
+    F -->|Yes| G[Use cache immediately<br/>Terminal jobs never expire]
+    F -->|No| I{Time elapsed < TTL?}
+    I -->|Yes| J[Use cache<br/>Within TTL window]
+    I -->|No| H
+    H --> K[Parse logs to Parquet]
+    K --> L[Store in blob storage with metadata]
+    L --> M[Create local cache file]
+    G --> N[Create local cache file]
+    J --> N
+    M --> O[Return local file path]
+    N --> O
+
+    classDef terminal fill:#1a472a,stroke:#4ade80,color:#ffffff
+    classDef cache fill:#1e3a8a,stroke:#60a5fa,color:#ffffff
+    classDef download fill:#7c2d12,stroke:#fb923c,color:#ffffff
+    classDef decision fill:#374151,stroke:#9ca3af,color:#ffffff
+
+    class G,F terminal
+    class B,C,I,J,N cache
+    class H,K,L,M download
+    class D,E decision
+```
+
+**Caching Strategy:**
+- **Terminal Jobs**: Once a job completes, logs never change → cache forever (no TTL check)
+- **Running Jobs**: Logs may still be updated → respect TTL to ensure fresh data
+- **Force Refresh**: Override cache entirely for debugging or manual refresh scenarios
 
 ### Benefits of Parquet Format
 

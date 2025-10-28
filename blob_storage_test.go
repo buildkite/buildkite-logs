@@ -21,7 +21,7 @@ func TestBlobStorage(t *testing.T) {
 	storageURL := "file://" + tempDir
 
 	// Create blob storage
-	blobStorage, err := NewBlobStorage(ctx, storageURL)
+	blobStorage, err := NewBlobStorage(ctx, storageURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create blob storage: %v", err)
 	}
@@ -77,8 +77,8 @@ func TestBlobStorage(t *testing.T) {
 }
 
 func TestGetDefaultStorageURL(t *testing.T) {
-	// Test default storage URL
-	defaultURL, err := GetDefaultStorageURL("")
+	// Test default storage URL without no_tmp_dir
+	defaultURL, err := GetDefaultStorageURL("", false)
 	if err != nil {
 		t.Fatalf("GetDefaultStorageURL() failed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestWriteWithMetadataCloseError(t *testing.T) {
 	storageURL := "file://" + tempDir
 
 	// Create blob storage
-	blobStorage, err := NewBlobStorage(ctx, storageURL)
+	blobStorage, err := NewBlobStorage(ctx, storageURL, &BlobStorageOptions{NoTempDir: true})
 	if err != nil {
 		t.Fatalf("Failed to create blob storage: %v", err)
 	}
@@ -186,5 +186,150 @@ func TestWriteWithMetadataCloseError(t *testing.T) {
 	exists, _ := blobStorage.Exists(ctx, key2)
 	if exists {
 		t.Error("File should not exist after failed write")
+	}
+}
+
+func TestBlobStorageOptionsNil(t *testing.T) {
+	ctx := context.Background()
+
+	// Create temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bklog-opts-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	storageURL := "file://" + tempDir
+
+	// Create blob storage with nil options (backward compatibility)
+	blobStorage, err := NewBlobStorage(ctx, storageURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to create blob storage with nil options: %v", err)
+	}
+	defer blobStorage.Close()
+
+	// Test basic write operation
+	key := "test-nil-opts.parquet"
+	testData := []byte("test data")
+	metadata := &BlobMetadata{
+		JobID:        "test-job",
+		JobState:     "finished",
+		IsTerminal:   true,
+		CachedAt:     time.Now(),
+		TTL:          "30s",
+		Organization: "test-org",
+		Pipeline:     "test-pipeline",
+		Build:        "123",
+	}
+
+	err = blobStorage.WriteWithMetadata(ctx, key, testData, metadata)
+	if err != nil {
+		t.Fatalf("Failed to write with nil options: %v", err)
+	}
+
+	// Verify the blob exists
+	exists, err := blobStorage.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Failed to check blob existence: %v", err)
+	}
+	if !exists {
+		t.Fatal("Blob should exist after writing with nil options")
+	}
+}
+
+func TestBlobStorageOptionsNoTempDir(t *testing.T) {
+	ctx := context.Background()
+
+	// Create temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bklog-notmp-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	storageURL := "file://" + tempDir
+
+	// Create blob storage with NoTempDir=true
+	opts := &BlobStorageOptions{NoTempDir: true}
+	blobStorage, err := NewBlobStorage(ctx, storageURL, opts)
+	if err != nil {
+		t.Fatalf("Failed to create blob storage with NoTempDir=true: %v", err)
+	}
+	defer blobStorage.Close()
+
+	// Test write operation
+	key := "test-notmpdir.parquet"
+	testData := []byte("test data with no_tmp_dir")
+	metadata := &BlobMetadata{
+		JobID:        "test-job",
+		JobState:     "finished",
+		IsTerminal:   true,
+		CachedAt:     time.Now(),
+		TTL:          "30s",
+		Organization: "test-org",
+		Pipeline:     "test-pipeline",
+		Build:        "123",
+	}
+
+	err = blobStorage.WriteWithMetadata(ctx, key, testData, metadata)
+	if err != nil {
+		t.Fatalf("Failed to write with NoTempDir=true: %v", err)
+	}
+
+	// Verify the blob exists
+	exists, err := blobStorage.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Failed to check blob existence: %v", err)
+	}
+	if !exists {
+		t.Fatal("Blob should exist after writing with NoTempDir=true")
+	}
+
+	// Verify we can read the data back
+	readMetadata, err := blobStorage.ReadWithMetadata(ctx, key)
+	if err != nil {
+		t.Fatalf("Failed to read blob with NoTempDir=true: %v", err)
+	}
+	if readMetadata == nil {
+		t.Fatal("Expected metadata, got nil")
+	}
+	if readMetadata.JobID != metadata.JobID {
+		t.Errorf("Expected JobID %s, got %s", metadata.JobID, readMetadata.JobID)
+	}
+}
+
+func TestGetDefaultStorageURLWithNoTempDir(t *testing.T) {
+	// Test that GetDefaultStorageURL adds the no_tmp_dir parameter when requested
+	url, err := GetDefaultStorageURL("", true)
+	if err != nil {
+		t.Fatalf("GetDefaultStorageURL with noTempDir=true failed: %v", err)
+	}
+
+	// Should have file:// prefix
+	if !strings.HasPrefix(url, "file://") {
+		t.Errorf("Expected file:// URL, got: %s", url)
+	}
+
+	// Should contain no_tmp_dir=true parameter
+	if !strings.Contains(url, "no_tmp_dir=true") {
+		t.Errorf("Expected URL to contain 'no_tmp_dir=true', got: %s", url)
+	}
+}
+
+func TestGetDefaultStorageURLWithoutNoTempDir(t *testing.T) {
+	// Test that GetDefaultStorageURL does not add the parameter when not requested
+	url, err := GetDefaultStorageURL("", false)
+	if err != nil {
+		t.Fatalf("GetDefaultStorageURL with noTempDir=false failed: %v", err)
+	}
+
+	// Should have file:// prefix
+	if !strings.HasPrefix(url, "file://") {
+		t.Errorf("Expected file:// URL, got: %s", url)
+	}
+
+	// Should NOT contain no_tmp_dir parameter
+	if strings.Contains(url, "no_tmp_dir") {
+		t.Errorf("Expected URL to NOT contain 'no_tmp_dir', got: %s", url)
 	}
 }

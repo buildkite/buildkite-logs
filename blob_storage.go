@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"gocloud.dev/blob"
@@ -30,12 +31,47 @@ type BlobMetadata struct {
 	Build        string    `json:"build"`
 }
 
+// BlobStorageOptions contains configuration options for blob storage
+type BlobStorageOptions struct {
+	// NoTempDir controls whether to use the no_tmp_dir URL parameter for file:// URLs.
+	// When true, temporary files are created in the same directory as the final destination,
+	// avoiding cross-filesystem rename errors. This may result in stranded .tmp files if
+	// the process crashes before cleanup runs.
+	//
+	// When false (default), temporary files are created in os.TempDir(), which may cause
+	// "invalid cross-device link" errors if the temp directory is on a different filesystem
+	// than the storage directory.
+	NoTempDir bool
+}
+
 // NewBlobStorage creates a new blob storage instance from a storage URL
 // Supports file:// URLs for local filesystem storage
-func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error) {
-	storageURL, err := GetDefaultStorageURL(storageURL)
+//
+// The opts parameter allows configuring blob storage behavior. Pass nil to use default options.
+func NewBlobStorage(ctx context.Context, storageURL string, opts *BlobStorageOptions) (*BlobStorage, error) {
+	// Extract options, using defaults if nil
+	noTempDir := false
+	if opts != nil {
+		noTempDir = opts.NoTempDir
+	}
+
+	// Get or build the storage URL
+	storageURL, err := GetDefaultStorageURL(storageURL, noTempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default storage URL: %w", err)
+	}
+
+	// If user provided a file:// URL and NoTempDir is requested, ensure the parameter is added
+	if noTempDir && len(storageURL) > 7 && storageURL[:7] == "file://" {
+		// Check if no_tmp_dir parameter is already present
+		if !containsNoTmpDir(storageURL) {
+			// Add the parameter
+			if containsQueryString(storageURL) {
+				storageURL += "&no_tmp_dir=true"
+			} else {
+				storageURL += "?no_tmp_dir=true"
+			}
+		}
 	}
 
 	// For other URLs (s3://, gcs://, etc.), use blob.OpenBucket
@@ -49,8 +85,22 @@ func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error
 	}, nil
 }
 
+// containsNoTmpDir checks if a URL already has the no_tmp_dir parameter
+func containsNoTmpDir(url string) bool {
+	return strings.Contains(url, "no_tmp_dir=true")
+}
+
+// containsQueryString checks if a URL has a query string
+func containsQueryString(url string) bool {
+	return strings.Contains(url, "?")
+}
+
 // GetDefaultStorageURL returns the default storage URL based on environment
-func GetDefaultStorageURL(storageURL string) (string, error) {
+//
+// If noTempDir is true, the returned file:// URL will include the no_tmp_dir parameter,
+// which causes gocloud.dev/blob/fileblob to create temporary files in the same directory
+// as the final destination, avoiding cross-filesystem rename errors.
+func GetDefaultStorageURL(storageURL string, noTempDir bool) (string, error) {
 	// If a storage URL is provided, use it
 	if storageURL != "" {
 		return storageURL, nil
@@ -79,7 +129,15 @@ func GetDefaultStorageURL(storageURL string) (string, error) {
 		return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
 	}
 
-	return fmt.Sprintf("file://%s", dirPath), nil
+	// Build the URL
+	url := fmt.Sprintf("file://%s", dirPath)
+
+	// Add no_tmp_dir parameter if requested
+	if noTempDir {
+		url += "?no_tmp_dir=true"
+	}
+
+	return url, nil
 }
 
 // IsContainerizedEnvironment detects if we're running in a container

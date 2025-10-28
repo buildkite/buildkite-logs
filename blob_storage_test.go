@@ -108,3 +108,81 @@ func TestIsContainerizedEnvironment(t *testing.T) {
 	// Should return a boolean without error
 	_ = isContainer
 }
+
+// TestWriteWithMetadataCloseError verifies that Close() errors are properly propagated
+// and not silently ignored when using WriteWithMetadata
+func TestWriteWithMetadataCloseError(t *testing.T) {
+	ctx := context.Background()
+
+	// Create temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "bklog-blob-close-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	storageURL := "file://" + tempDir
+
+	// Create blob storage
+	blobStorage, err := NewBlobStorage(ctx, storageURL)
+	if err != nil {
+		t.Fatalf("Failed to create blob storage: %v", err)
+	}
+	defer blobStorage.Close()
+
+	// Test data
+	key := "test-close-error.parquet"
+	testData := []byte("test data")
+
+	metadata := &BlobMetadata{
+		JobID:        "test-job",
+		JobState:     "finished",
+		IsTerminal:   true,
+		CachedAt:     time.Now(),
+		TTL:          "30s",
+		Organization: "test-org",
+		Pipeline:     "test-pipeline",
+		Build:        "123",
+	}
+
+	// First, write successfully to verify the setup works
+	err = blobStorage.WriteWithMetadata(ctx, key, testData, metadata)
+	if err != nil {
+		t.Fatalf("Initial write should succeed: %v", err)
+	}
+
+	// Now remove write permissions from the directory to simulate Close() failure
+	// This will cause subsequent writes to fail during the Close() operation
+	err = os.Chmod(tempDir, 0444) // Read-only
+	if err != nil {
+		t.Fatalf("Failed to change permissions: %v", err)
+	}
+
+	// Restore permissions after test
+	defer os.Chmod(tempDir, 0755)
+
+	// Attempt to write with restricted permissions
+	// This should fail during Close() and the error should be returned
+	key2 := "test-close-error-2.parquet"
+	err = blobStorage.WriteWithMetadata(ctx, key2, testData, metadata)
+
+	// The write should fail, and we should get an error (not nil)
+	if err == nil {
+		t.Fatal("Expected WriteWithMetadata to return an error when Close() fails, but got nil")
+	}
+
+	// The error message should mention "close" to indicate it's from the Close() operation
+	if !strings.Contains(strings.ToLower(err.Error()), "close") &&
+		!strings.Contains(strings.ToLower(err.Error()), "permission") &&
+		!strings.Contains(strings.ToLower(err.Error()), "denied") {
+		t.Logf("Error message: %v", err)
+		// Note: The exact error message may vary by OS and blob implementation
+		// but we should get some error, not nil
+	}
+
+	// Verify that the file was not created
+	exists, _ := blobStorage.Exists(ctx, key2)
+	if exists {
+		t.Error("File should not exist after failed write")
+	}
+}

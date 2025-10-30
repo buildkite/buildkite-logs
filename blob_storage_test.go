@@ -159,7 +159,9 @@ func TestWriteWithMetadataCloseError(t *testing.T) {
 	}
 
 	// Restore permissions after test
-	defer os.Chmod(tempDir, 0755)
+	defer func() {
+		_ = os.Chmod(tempDir, 0755)
+	}()
 
 	// Attempt to write with restricted permissions
 	// This should fail during Close() and the error should be returned

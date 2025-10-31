@@ -1,0 +1,38 @@
+# Git
+.git/
+.github/
+
+# Build artifacts
+/build/
+/dist/
+/bklog
+cmd/bklog/bklog
+
+# Test artifacts
+*.parquet
+cover.out
+cover-tree.svg
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.envrc*
+.env
+
+# Documentation and development files
+/.claude/
+/PRD/
+*.md
+!README.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Goreleaser
+.goreleaser.yaml

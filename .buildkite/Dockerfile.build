@@ -1,1 +1,24 @@
 FROM golang:1.25.1@sha256:a5e935dbd8bc3a5ea24388e376388c9a69b40628b6788a81658a801abbec8f2e
+
+# Create a non-root user with a specific UID/GID
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+RUN groupadd -g ${GROUP_ID} buildkite-agent && \
+    useradd -m -u ${USER_ID} -g ${GROUP_ID} buildkite-agent
+
+# Set working directory
+WORKDIR /app
+RUN chown buildkite-agent:buildkite-agent /app
+
+# Copy go module files first for better layer caching
+# This layer will be cached unless go.mod/go.sum changes
+COPY --chown=buildkite-agent:buildkite-agent go.mod go.sum ./
+
+# Download dependencies - this layer will be cached if go.mod/go.sum don't change
+RUN go mod download
+
+# Copy the entire source code
+COPY --chown=buildkite-agent:buildkite-agent . .
+
+# Switch to non-root user
+USER buildkite-agent

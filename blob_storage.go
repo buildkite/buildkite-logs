@@ -139,10 +139,14 @@ func (bs *BlobStorage) WriteWithMetadata(ctx context.Context, key string, data [
 	if err != nil {
 		return fmt.Errorf("failed to create blob writer: %w", err)
 	}
-	defer writer.Close()
 
 	if _, err := writer.Write(data); err != nil {
+		writer.Close()
 		return fmt.Errorf("failed to write blob data: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("failed to close blob writer: %w", err)
 	}
 
 	return nil

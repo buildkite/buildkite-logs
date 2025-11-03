@@ -12,11 +12,14 @@ services:
     command: golangci-lint run --timeout 5m --config .golangci.yml
   golang:
     build:
-      context: .
-      dockerfile: Dockerfile.build
+      context: ..
+      dockerfile: .buildkite/Dockerfile.build
+      args:
+        - USER_ID=${USER_ID:-1000}
+        - GROUP_ID=${GROUP_ID:-1000}
+    user: "${USER_ID:-1000}:${GROUP_ID:-1000}"
     working_dir: /app
     volumes:
-      - ..:/app:cached
       - gocache:/gocache
       - gomodcache:/gomodcache
 volumes:

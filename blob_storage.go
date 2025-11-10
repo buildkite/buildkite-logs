@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -55,26 +56,13 @@ func NewBlobStorage(ctx context.Context, storageURL string, opts *BlobStorageOpt
 		noTempDir = opts.NoTempDir
 	}
 
-	// Get or build the storage URL
+	// Get or build the storage URL (handles parameter addition internally)
 	storageURL, err := GetDefaultStorageURL(storageURL, noTempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default storage URL: %w", err)
 	}
 
-	// If user provided a file:// URL and NoTempDir is requested, ensure the parameter is added
-	if noTempDir && len(storageURL) > 7 && storageURL[:7] == "file://" {
-		// Check if no_tmp_dir parameter is already present
-		if !containsNoTmpDir(storageURL) {
-			// Add the parameter
-			if containsQueryString(storageURL) {
-				storageURL += "&no_tmp_dir=true"
-			} else {
-				storageURL += "?no_tmp_dir=true"
-			}
-		}
-	}
-
-	// For other URLs (s3://, gcs://, etc.), use blob.OpenBucket
+	// Open the bucket (supports file://, s3://, gcs://, etc.)
 	bucket, err := blob.OpenBucket(ctx, storageURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open blob bucket %s: %w", storageURL, err)
@@ -85,14 +73,22 @@ func NewBlobStorage(ctx context.Context, storageURL string, opts *BlobStorageOpt
 	}, nil
 }
 
-// containsNoTmpDir checks if a URL already has the no_tmp_dir parameter
-func containsNoTmpDir(url string) bool {
-	return strings.Contains(url, "no_tmp_dir=true")
-}
+// addNoTmpDirParam adds the no_tmp_dir=true parameter to a URL if not already present.
+// Uses proper URL parsing to handle existing query parameters correctly.
+func addNoTmpDirParam(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
 
-// containsQueryString checks if a URL has a query string
-func containsQueryString(url string) bool {
-	return strings.Contains(url, "?")
+	q := u.Query()
+	// Only add if not already present (handles any case/value variations)
+	if q.Get("no_tmp_dir") == "" {
+		q.Set("no_tmp_dir", "true")
+		u.RawQuery = q.Encode()
+	}
+
+	return u.String(), nil
 }
 
 // GetDefaultStorageURL returns the default storage URL based on environment
@@ -100,44 +96,51 @@ func containsQueryString(url string) bool {
 // If noTempDir is true, the returned file:// URL will include the no_tmp_dir parameter,
 // which causes gocloud.dev/blob/fileblob to create temporary files in the same directory
 // as the final destination, avoiding cross-filesystem rename errors.
+//
+// This function applies the noTempDir setting to both user-provided and default URLs.
 func GetDefaultStorageURL(storageURL string, noTempDir bool) (string, error) {
-	// If a storage URL is provided, use it
+	var finalURL string
+
+	// If a storage URL is provided, use it; otherwise build a default
 	if storageURL != "" {
-		return storageURL, nil
-	}
-
-	var dirPath string
-
-	// Check if we're in a containerized environment (Docker/Kubernetes)
-	if IsContainerizedEnvironment() {
-		tempDir := os.TempDir()
-		dirPath = fmt.Sprintf("%s/bklog", tempDir)
+		finalURL = storageURL
 	} else {
-		// Default to user's home directory for desktop usage
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			// Fallback to temp directory if home directory is unavailable
+		var dirPath string
+
+		// Check if we're in a containerized environment (Docker/Kubernetes)
+		if IsContainerizedEnvironment() {
 			tempDir := os.TempDir()
 			dirPath = fmt.Sprintf("%s/bklog", tempDir)
 		} else {
-			dirPath = fmt.Sprintf("%s/.bklog", homeDir)
+			// Default to user's home directory for desktop usage
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				// Fallback to temp directory if home directory is unavailable
+				tempDir := os.TempDir()
+				dirPath = fmt.Sprintf("%s/bklog", tempDir)
+			} else {
+				dirPath = fmt.Sprintf("%s/.bklog", homeDir)
+			}
+		}
+
+		// Ensure the directory exists
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
+		}
+
+		finalURL = fmt.Sprintf("file://%s", dirPath)
+	}
+
+	// Apply no_tmp_dir parameter to ALL file:// URLs if requested
+	if noTempDir && strings.HasPrefix(finalURL, "file://") {
+		var err error
+		finalURL, err = addNoTmpDirParam(finalURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to add no_tmp_dir parameter: %w", err)
 		}
 	}
 
-	// Ensure the directory exists
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
-	}
-
-	// Build the URL
-	url := fmt.Sprintf("file://%s", dirPath)
-
-	// Add no_tmp_dir parameter if requested
-	if noTempDir {
-		url += "?no_tmp_dir=true"
-	}
-
-	return url, nil
+	return finalURL, nil
 }
 
 // IsContainerizedEnvironment detects if we're running in a container

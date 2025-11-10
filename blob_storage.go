@@ -50,13 +50,11 @@ type BlobStorageOptions struct {
 //
 // The opts parameter allows configuring blob storage behavior. Pass nil to use default options.
 func NewBlobStorage(ctx context.Context, storageURL string, opts *BlobStorageOptions) (*BlobStorage, error) {
-	// Extract options, using defaults if nil
 	noTempDir := false
 	if opts != nil {
 		noTempDir = opts.NoTempDir
 	}
 
-	// Get or build the storage URL (handles parameter addition internally)
 	storageURL, err := GetDefaultStorageURL(storageURL, noTempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default storage URL: %w", err)
@@ -101,7 +99,6 @@ func addNoTmpDirParam(rawURL string) (string, error) {
 func GetDefaultStorageURL(storageURL string, noTempDir bool) (string, error) {
 	var finalURL string
 
-	// If a storage URL is provided, use it; otherwise build a default
 	if storageURL != "" {
 		finalURL = storageURL
 	} else {
@@ -109,21 +106,18 @@ func GetDefaultStorageURL(storageURL string, noTempDir bool) (string, error) {
 
 		// Check if we're in a containerized environment (Docker/Kubernetes)
 		if IsContainerizedEnvironment() {
-			tempDir := os.TempDir()
-			dirPath = fmt.Sprintf("%s/bklog", tempDir)
+			dirPath = fmt.Sprintf("%s/bklog", os.TempDir())
 		} else {
 			// Default to user's home directory for desktop usage
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				// Fallback to temp directory if home directory is unavailable
-				tempDir := os.TempDir()
-				dirPath = fmt.Sprintf("%s/bklog", tempDir)
+				dirPath = fmt.Sprintf("%s/bklog", os.TempDir())
 			} else {
 				dirPath = fmt.Sprintf("%s/.bklog", homeDir)
 			}
 		}
 
-		// Ensure the directory exists
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
 			return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
 		}
@@ -215,13 +209,11 @@ func (bs *BlobStorage) WriteWithMetadata(ctx context.Context, key string, data [
 
 // ReadWithMetadata reads data from blob storage with metadata
 func (bs *BlobStorage) ReadWithMetadata(ctx context.Context, key string) (*BlobMetadata, error) {
-	// Get blob attributes for metadata
 	attrs, err := bs.bucket.Attributes(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blob attributes: %w", err)
 	}
 
-	// Extract metadata
 	var metadata *BlobMetadata
 	if len(attrs.Metadata) > 0 {
 		metadata = &BlobMetadata{}

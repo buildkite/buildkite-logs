@@ -11,7 +11,6 @@ import (
 func TestBlobStorage(t *testing.T) {
 	ctx := context.Background()
 
-	// Create temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "bklog-blob-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -20,14 +19,12 @@ func TestBlobStorage(t *testing.T) {
 
 	storageURL := "file://" + tempDir
 
-	// Create blob storage
 	blobStorage, err := NewBlobStorage(ctx, storageURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create blob storage: %v", err)
 	}
 	defer blobStorage.Close()
 
-	// Test data
 	key := "test-org-test-pipeline-123-abc-def.parquet"
 	testData := []byte("test parquet data")
 
@@ -42,13 +39,11 @@ func TestBlobStorage(t *testing.T) {
 		Build:        "123",
 	}
 
-	// Test write
 	err = blobStorage.WriteWithMetadata(ctx, key, testData, metadata)
 	if err != nil {
 		t.Fatalf("Failed to write blob: %v", err)
 	}
 
-	// Test exists
 	exists, err := blobStorage.Exists(ctx, key)
 	if err != nil {
 		t.Fatalf("Failed to check blob existence: %v", err)
@@ -57,7 +52,6 @@ func TestBlobStorage(t *testing.T) {
 		t.Fatal("Blob should exist after writing")
 	}
 
-	// Test read
 	readMetadata, err := blobStorage.ReadWithMetadata(ctx, key)
 	if err != nil {
 		t.Fatalf("Failed to read blob: %v", err)
@@ -192,7 +186,6 @@ func TestWriteWithMetadataCloseError(t *testing.T) {
 func TestBlobStorageOptionsNil(t *testing.T) {
 	ctx := context.Background()
 
-	// Create temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "bklog-opts-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -227,7 +220,6 @@ func TestBlobStorageOptionsNil(t *testing.T) {
 		t.Fatalf("Failed to write with nil options: %v", err)
 	}
 
-	// Verify the blob exists
 	exists, err := blobStorage.Exists(ctx, key)
 	if err != nil {
 		t.Fatalf("Failed to check blob existence: %v", err)
@@ -249,15 +241,12 @@ func TestBlobStorageOptionsNoTempDir(t *testing.T) {
 
 	storageURL := "file://" + tempDir
 
-	// Create blob storage with NoTempDir=true
-	opts := &BlobStorageOptions{NoTempDir: true}
-	blobStorage, err := NewBlobStorage(ctx, storageURL, opts)
+	blobStorage, err := NewBlobStorage(ctx, storageURL, &BlobStorageOptions{NoTempDir: true})
 	if err != nil {
 		t.Fatalf("Failed to create blob storage with NoTempDir=true: %v", err)
 	}
 	defer blobStorage.Close()
 
-	// Test write operation
 	key := "test-notmpdir.parquet"
 	testData := []byte("test data with no_tmp_dir")
 	metadata := &BlobMetadata{
@@ -299,36 +288,30 @@ func TestBlobStorageOptionsNoTempDir(t *testing.T) {
 }
 
 func TestGetDefaultStorageURLWithNoTempDir(t *testing.T) {
-	// Test that GetDefaultStorageURL adds the no_tmp_dir parameter when requested
 	url, err := GetDefaultStorageURL("", true)
 	if err != nil {
 		t.Fatalf("GetDefaultStorageURL with noTempDir=true failed: %v", err)
 	}
 
-	// Should have file:// prefix
 	if !strings.HasPrefix(url, "file://") {
 		t.Errorf("Expected file:// URL, got: %s", url)
 	}
 
-	// Should contain no_tmp_dir=true parameter
 	if !strings.Contains(url, "no_tmp_dir=true") {
 		t.Errorf("Expected URL to contain 'no_tmp_dir=true', got: %s", url)
 	}
 }
 
 func TestGetDefaultStorageURLWithoutNoTempDir(t *testing.T) {
-	// Test that GetDefaultStorageURL does not add the parameter when not requested
 	url, err := GetDefaultStorageURL("", false)
 	if err != nil {
 		t.Fatalf("GetDefaultStorageURL with noTempDir=false failed: %v", err)
 	}
 
-	// Should have file:// prefix
 	if !strings.HasPrefix(url, "file://") {
 		t.Errorf("Expected file:// URL, got: %s", url)
 	}
 
-	// Should NOT contain no_tmp_dir parameter
 	if strings.Contains(url, "no_tmp_dir") {
 		t.Errorf("Expected URL to NOT contain 'no_tmp_dir', got: %s", url)
 	}
@@ -337,12 +320,12 @@ func TestGetDefaultStorageURLWithoutNoTempDir(t *testing.T) {
 // TestURLParameterEdgeCases tests edge cases for URL parameter handling
 func TestURLParameterEdgeCases(t *testing.T) {
 	tests := []struct {
-		name          string
-		inputURL      string
-		noTempDir     bool
-		wantContains  string
+		name           string
+		inputURL       string
+		noTempDir      bool
+		wantContains   string
 		wantNotContain string
-		wantErr       bool
+		wantErr        bool
 	}{
 		{
 			name:         "file URL with no params, NoTempDir=true",
@@ -444,9 +427,9 @@ func TestAddNoTmpDirParam(t *testing.T) {
 			wantContains: "no_tmp_dir=true",
 		},
 		{
-			name:    "invalid URL",
+			name:     "invalid URL",
 			inputURL: "://invalid",
-			wantErr: true,
+			wantErr:  true,
 		},
 	}
 
@@ -487,9 +470,7 @@ func TestUserProvidedURLWithNoTempDir(t *testing.T) {
 	// User provides a file:// URL without the parameter
 	userURL := "file://" + tempDir
 
-	// Create blob storage with NoTempDir=true
-	opts := &BlobStorageOptions{NoTempDir: true}
-	blobStorage, err := NewBlobStorage(ctx, userURL, opts)
+	blobStorage, err := NewBlobStorage(ctx, userURL, &BlobStorageOptions{NoTempDir: true})
 	if err != nil {
 		t.Fatalf("Failed to create blob storage: %v", err)
 	}

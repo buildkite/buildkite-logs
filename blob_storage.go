@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"gocloud.dev/blob"
@@ -30,15 +32,35 @@ type BlobMetadata struct {
 	Build        string    `json:"build"`
 }
 
+// BlobStorageOptions contains configuration options for blob storage
+type BlobStorageOptions struct {
+	// NoTempDir controls whether to use the no_tmp_dir URL parameter for file:// URLs.
+	// When true, temporary files are created in the same directory as the final destination,
+	// avoiding cross-filesystem rename errors. This may result in stranded .tmp files if
+	// the process crashes before cleanup runs.
+	//
+	// When false (default), temporary files are created in os.TempDir(), which may cause
+	// "invalid cross-device link" errors if the temp directory is on a different filesystem
+	// than the storage directory.
+	NoTempDir bool
+}
+
 // NewBlobStorage creates a new blob storage instance from a storage URL
 // Supports file:// URLs for local filesystem storage
-func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error) {
-	storageURL, err := GetDefaultStorageURL(storageURL)
+//
+// The opts parameter allows configuring blob storage behavior. Pass nil to use default options.
+func NewBlobStorage(ctx context.Context, storageURL string, opts *BlobStorageOptions) (*BlobStorage, error) {
+	noTempDir := false
+	if opts != nil {
+		noTempDir = opts.NoTempDir
+	}
+
+	storageURL, err := GetDefaultStorageURL(storageURL, noTempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default storage URL: %w", err)
 	}
 
-	// For other URLs (s3://, gcs://, etc.), use blob.OpenBucket
+	// Open the bucket (supports file://, s3://, gcs://, etc.)
 	bucket, err := blob.OpenBucket(ctx, storageURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open blob bucket %s: %w", storageURL, err)
@@ -49,37 +71,70 @@ func NewBlobStorage(ctx context.Context, storageURL string) (*BlobStorage, error
 	}, nil
 }
 
-// GetDefaultStorageURL returns the default storage URL based on environment
-func GetDefaultStorageURL(storageURL string) (string, error) {
-	// If a storage URL is provided, use it
-	if storageURL != "" {
-		return storageURL, nil
+// addNoTmpDirParam adds the no_tmp_dir=true parameter to a URL if not already present.
+// Uses proper URL parsing to handle existing query parameters correctly.
+func addNoTmpDirParam(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	var dirPath string
+	q := u.Query()
+	// Only add if not already present (handles any case/value variations)
+	if q.Get("no_tmp_dir") == "" {
+		q.Set("no_tmp_dir", "true")
+		u.RawQuery = q.Encode()
+	}
 
-	// Check if we're in a containerized environment (Docker/Kubernetes)
-	if IsContainerizedEnvironment() {
-		tempDir := os.TempDir()
-		dirPath = fmt.Sprintf("%s/bklog", tempDir)
+	return u.String(), nil
+}
+
+// GetDefaultStorageURL returns the default storage URL based on environment
+//
+// If noTempDir is true, the returned file:// URL will include the no_tmp_dir parameter,
+// which causes gocloud.dev/blob/fileblob to create temporary files in the same directory
+// as the final destination, avoiding cross-filesystem rename errors.
+//
+// This function applies the noTempDir setting to both user-provided and default URLs.
+func GetDefaultStorageURL(storageURL string, noTempDir bool) (string, error) {
+	var finalURL string
+
+	if storageURL != "" {
+		finalURL = storageURL
 	} else {
-		// Default to user's home directory for desktop usage
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			// Fallback to temp directory if home directory is unavailable
-			tempDir := os.TempDir()
-			dirPath = fmt.Sprintf("%s/bklog", tempDir)
+		var dirPath string
+
+		// Check if we're in a containerized environment (Docker/Kubernetes)
+		if IsContainerizedEnvironment() {
+			dirPath = fmt.Sprintf("%s/bklog", os.TempDir())
 		} else {
-			dirPath = fmt.Sprintf("%s/.bklog", homeDir)
+			// Default to user's home directory for desktop usage
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				// Fallback to temp directory if home directory is unavailable
+				dirPath = fmt.Sprintf("%s/bklog", os.TempDir())
+			} else {
+				dirPath = fmt.Sprintf("%s/.bklog", homeDir)
+			}
+		}
+
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
+		}
+
+		finalURL = fmt.Sprintf("file://%s", dirPath)
+	}
+
+	// Apply no_tmp_dir parameter to ALL file:// URLs if requested
+	if noTempDir && strings.HasPrefix(finalURL, "file://") {
+		var err error
+		finalURL, err = addNoTmpDirParam(finalURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to add no_tmp_dir parameter: %w", err)
 		}
 	}
 
-	// Ensure the directory exists
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to create storage directory %s: %w", dirPath, err)
-	}
-
-	return fmt.Sprintf("file://%s", dirPath), nil
+	return finalURL, nil
 }
 
 // IsContainerizedEnvironment detects if we're running in a container
@@ -154,13 +209,11 @@ func (bs *BlobStorage) WriteWithMetadata(ctx context.Context, key string, data [
 
 // ReadWithMetadata reads data from blob storage with metadata
 func (bs *BlobStorage) ReadWithMetadata(ctx context.Context, key string) (*BlobMetadata, error) {
-	// Get blob attributes for metadata
 	attrs, err := bs.bucket.Attributes(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blob attributes: %w", err)
 	}
 
-	// Extract metadata
 	var metadata *BlobMetadata
 	if len(attrs.Metadata) > 0 {
 		metadata = &BlobMetadata{}

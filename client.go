@@ -118,7 +118,7 @@ func NewClient(ctx context.Context, client *buildkite.Client, storageURL string)
 // NewClientWithAPI creates a new Client using a custom BuildkiteAPI implementation
 func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string) (*Client, error) {
 	// Initialize blob storage once during client creation
-	blobStorage, err := NewBlobStorage(ctx, storageURL)
+	blobStorage, err := NewBlobStorage(ctx, storageURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize blob storage: %w", err)
 	}

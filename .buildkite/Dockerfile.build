@@ -1,4 +1,4 @@
-FROM golang:1.25.4@sha256:6ca9eb0b32a4bd4e8c98a4a2edf2d7c96f3ea6db6eb4fc254eef6c067cf73bb4
+FROM golang:1.26rc2@sha256:6ea9974028bfaaa0251e42468ec037fe21e49275a874914f3b42f58beabc84bf
 
 # Create a non-root user with a specific UID/GID
 ARG USER_ID=1000

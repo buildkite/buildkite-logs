@@ -1,10 +1,10 @@
 module github.com/buildkite/buildkite-logs
 
-go 1.24.4
+go 1.25
 
 require (
 	github.com/apache/arrow-go/v18 v18.4.0
-	github.com/buildkite/go-buildkite/v4 v4.9.1
+	github.com/buildkite/go-buildkite/v4 v4.14.1
 	gocloud.dev v0.44.0
 )
 

@@ -59,6 +59,58 @@ func TestParquetWriter(t *testing.T) {
 	}
 }
 
+func TestParquetRoundtrip(t *testing.T) {
+	testFile := "test_roundtrip.parquet"
+	defer os.Remove(testFile)
+
+	baseTime := time.Date(2025, 4, 22, 21, 43, 29, 0, time.UTC)
+	entries := []*LogEntry{
+		{Timestamp: baseTime, Content: "first line", RawLine: []byte("first line"), Group: "setup"},
+		{Timestamp: baseTime.Add(100 * time.Millisecond), Content: "second line", RawLine: []byte("second line"), Group: "test"},
+		{Timestamp: baseTime.Add(200 * time.Millisecond), Content: "third line", RawLine: []byte("third line"), Group: "cleanup"},
+	}
+
+	file, err := os.Create(testFile)
+	if err != nil {
+		t.Fatalf("Failed to create file: %v", err)
+	}
+
+	writer := NewParquetWriter(file)
+	if err := writer.WriteBatch(entries); err != nil {
+		t.Fatalf("WriteBatch failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	reader := NewParquetReader(testFile)
+	var results []ParquetLogEntry
+	for entry, err := range reader.ReadEntriesIter() {
+		if err != nil {
+			t.Fatalf("ReadEntriesIter failed: %v", err)
+		}
+		results = append(results, entry)
+	}
+
+	if len(results) != len(entries) {
+		t.Fatalf("Expected %d entries, got %d", len(entries), len(results))
+	}
+
+	for i, entry := range entries {
+		got := results[i]
+		wantTS := entry.Timestamp.UnixMilli()
+		if got.Timestamp != wantTS {
+			t.Errorf("Entry %d: timestamp = %d, want %d", i, got.Timestamp, wantTS)
+		}
+		if got.Content != entry.Content {
+			t.Errorf("Entry %d: content = %q, want %q", i, got.Content, entry.Content)
+		}
+		if got.Group != entry.Group {
+			t.Errorf("Entry %d: group = %q, want %q", i, got.Group, entry.Group)
+		}
+	}
+}
+
 func TestParquetSeq2Export(t *testing.T) {
 	parser := NewParser()
 

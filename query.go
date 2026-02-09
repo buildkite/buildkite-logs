@@ -319,7 +319,7 @@ func mapColumns(schema *arrow.Schema) (*columnMapping, error) {
 }
 
 // convertRecordToEntriesIterStreaming converts an Arrow record to an iterator over ParquetLogEntry with column mapping
-func convertRecordToEntriesIterStreaming(record arrow.Record, mapping *columnMapping, startRowNumber int64) iter.Seq2[ParquetLogEntry, error] {
+func convertRecordToEntriesIterStreaming(record arrow.RecordBatch, mapping *columnMapping, startRowNumber int64) iter.Seq2[ParquetLogEntry, error] {
 	return func(yield func(ParquetLogEntry, error) bool) {
 		numRows := int(record.NumRows())
 

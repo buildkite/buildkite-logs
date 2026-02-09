@@ -43,7 +43,7 @@ func createArrowSchema() *arrow.Schema {
 }
 
 // createRecordFromEntries creates an Arrow record from log entries using the writer's builders
-func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Record, error) {
+func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.RecordBatch, error) {
 	// String builders reset automatically after NewArray() call
 	// No explicit reset needed for StringBuilder
 
@@ -74,7 +74,7 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 	defer flagsArray.Release()
 
 	// Create record
-	return array.NewRecord(pw.schema, []arrow.Array{
+	return array.NewRecordBatch(pw.schema, []arrow.Array{
 		timestampArray,
 		contentArray,
 		groupArray,

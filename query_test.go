@@ -582,7 +582,10 @@ func writeTestParquetFile(filename string, entries []ParquetLogEntry) error {
 	}
 	defer file.Close()
 
-	writer := NewParquetWriter(file)
+	writer, err := NewParquetWriter(file)
+	if err != nil {
+		return err
+	}
 	defer writer.Close()
 
 	// Convert ParquetLogEntry to LogEntry format for writing

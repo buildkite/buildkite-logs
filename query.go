@@ -264,6 +264,9 @@ func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[Pa
 				}
 			}
 
+			// Capture row count before releasing the record
+			batchRows := record.NumRows()
+
 			// Process record batch with immediate cleanup and row tracking
 			shouldContinue := func() bool {
 				defer record.Release()
@@ -278,7 +281,7 @@ func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[Pa
 			}()
 
 			// Update current row position for next batch
-			currentRowPosition += int64(record.NumRows())
+			currentRowPosition += batchRows
 
 			if !shouldContinue {
 				return
@@ -547,6 +550,9 @@ func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[Parqu
 				}
 			}
 
+			// Capture row count before releasing the record
+			batchRows := record.NumRows()
+
 			// Process all entries in this record batch with row tracking
 			shouldContinue := func() bool {
 				defer record.Release()
@@ -561,7 +567,7 @@ func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[Parqu
 			}()
 
 			// Update current row position for next batch
-			currentRowPosition += int64(record.NumRows())
+			currentRowPosition += batchRows
 
 			if !shouldContinue {
 				return

@@ -20,7 +20,10 @@ func TestParquetWriter(t *testing.T) {
 	}()
 
 	// Create writer
-	writer := NewParquetWriter(file)
+	writer, err := NewParquetWriter(file)
+	if err != nil {
+		t.Fatalf("Failed to create writer: %v", err)
+	}
 	defer func() {
 		if err := writer.Close(); err != nil {
 			t.Logf("Warning: failed to close writer: %v", err)
@@ -75,7 +78,10 @@ func TestParquetRoundtrip(t *testing.T) {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
-	writer := NewParquetWriter(file)
+	writer, err := NewParquetWriter(file)
+	if err != nil {
+		t.Fatalf("Failed to create writer: %v", err)
+	}
 	if err := writer.WriteBatch(entries); err != nil {
 		t.Fatalf("WriteBatch failed: %v", err)
 	}

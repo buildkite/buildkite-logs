@@ -97,13 +97,13 @@ type ParquetWriter struct {
 }
 
 // NewParquetWriter creates a new Parquet writer for streaming
-func NewParquetWriter(file *os.File) *ParquetWriter {
+func NewParquetWriter(file *os.File) (*ParquetWriter, error) {
 	pool := memory.NewGoAllocator()
 	schema := createArrowSchema()
 
 	writer, err := createNewFileWriter(schema, file, pool)
 	if err != nil {
-		return nil // In a real implementation, we'd want to return the error
+		return nil, fmt.Errorf("failed to create Parquet writer: %w", err)
 	}
 
 	return &ParquetWriter{
@@ -117,7 +117,7 @@ func NewParquetWriter(file *os.File) *ParquetWriter {
 		contentBuilder:   array.NewStringBuilder(pool),
 		groupBuilder:     array.NewStringBuilder(pool),
 		flagsBuilder:     array.NewInt32Builder(pool),
-	}
+	}, nil
 }
 
 // WriteBatch writes a batch of log entries to the Parquet file
@@ -156,9 +156,9 @@ func ExportSeq2ToParquet(seq iter.Seq2[*LogEntry, error], filename string) error
 	defer func() { _ = file.Close() }()
 
 	// Create writer
-	writer := NewParquetWriter(file)
-	if writer == nil {
-		return fmt.Errorf("failed to create Parquet writer")
+	writer, err := NewParquetWriter(file)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = writer.Close() }()
 
@@ -205,9 +205,9 @@ func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*LogEntry, error], filename str
 	defer func() { _ = file.Close() }()
 
 	// Create writer
-	writer := NewParquetWriter(file)
-	if writer == nil {
-		return fmt.Errorf("failed to create Parquet writer")
+	writer, err := NewParquetWriter(file)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = writer.Close() }()
 

@@ -32,9 +32,9 @@ func TestDictionaryEncodingAcrossBatches(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 
 	// Create writer
-	writer := NewParquetWriter(tmpFile)
-	if writer == nil {
-		t.Fatal("Failed to create ParquetWriter")
+	writer, err := NewParquetWriter(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to create ParquetWriter: %v", err)
 	}
 
 	// Write first batch

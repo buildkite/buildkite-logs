@@ -47,7 +47,7 @@ func TestByteParserBasic(t *testing.T) {
 			name:        "Invalid OSC sequence",
 			input:       "\x1b_bk;t=invalid\x07content",
 			wantTs:      0,
-			wantContent: "\x1b_bk;t=invalid\x07content",
+			wantContent: "content",
 			wantHasTs:   false,
 		},
 	}
@@ -55,13 +55,6 @@ func TestByteParserBasic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			entry, err := parser.ParseLine(tt.input)
-
-			if tt.name == "Invalid OSC sequence" {
-				if err == nil {
-					t.Error("Expected error for invalid timestamp")
-				}
-				return
-			}
 
 			if err != nil {
 				t.Fatalf("ParseLine() error = %v", err)
@@ -118,5 +111,23 @@ func TestByteParserEdgeCases(t *testing.T) {
 				t.Error("ParseLine() returned nil entry")
 			}
 		})
+	}
+}
+
+func TestMultiOSCTruncation(t *testing.T) {
+	parser := NewByteParser()
+
+	input := "\x1b_bk;t=1745322209921\x07first content\x1b_bk;t=1745322209922\x07second content"
+	entry, err := parser.ParseLine(input)
+	if err != nil {
+		t.Fatalf("ParseLine() error = %v", err)
+	}
+
+	if entry.Content != "first content" {
+		t.Errorf("Content = %q, want %q", entry.Content, "first content")
+	}
+
+	if string(entry.RawLine) != input {
+		t.Errorf("RawLine = %q, want %q", string(entry.RawLine), input)
 	}
 }

@@ -54,7 +54,22 @@ func (p *ByteParser) ParseLine(line string) (*LogEntry, error) {
 	timestampBytes := data[timestampStart:timestampEnd]
 	timestampMs, err := strconv.ParseInt(string(timestampBytes), 10, 64)
 	if err != nil {
-		return nil, err
+		// OSC framing present but timestamp unparseable — treat as untimed line
+		// Strip the OSC envelope but preserve content after BEL
+		contentStart := timestampEnd + 1
+		contentData := data[contentStart:]
+
+		contentEnd := findNextOSCStart(contentData)
+		if contentEnd != -1 {
+			contentData = contentData[:contentEnd]
+		}
+
+		return &LogEntry{
+			Timestamp: time.Time{},
+			Content:   string(contentData),
+			RawLine:   data,
+			Group:     "",
+		}, nil
 	}
 
 	timestamp := time.Unix(0, timestampMs*int64(time.Millisecond))

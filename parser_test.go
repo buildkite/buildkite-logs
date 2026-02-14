@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// TestParseLine exercises Parser.ParseLine specifically (the wrapper that adds
+// group tracking on top of ByteParser.ParseLine). For byte-level parsing tests,
+// see TestByteParserBasic in scanner_test.go.
 func TestParseLine(t *testing.T) {
 	parser := NewParser()
 
@@ -79,29 +82,29 @@ func TestLogEntryClassification(t *testing.T) {
 	parser := NewParser()
 
 	tests := []struct {
-		name        string
-		input       string
-		wantSection bool
+		name      string
+		input     string
+		wantGroup bool
 	}{
 		{
-			name:        "Command with ANSI",
-			input:       "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment",
-			wantSection: false,
+			name:      "Command with ANSI",
+			input:     "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment",
+			wantGroup: false,
 		},
 		{
-			name:        "Section header",
-			input:       "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
-			wantSection: true,
+			name:      "Section header",
+			input:     "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
+			wantGroup: true,
 		},
 		{
-			name:        "Build artifact section",
-			input:       "\x1b_bk;t=1745322210701\x07+++ :frame_with_picture: Inline image uploaded",
-			wantSection: true,
+			name:      "Build artifact section",
+			input:     "\x1b_bk;t=1745322210701\x07+++ :frame_with_picture: Inline image uploaded",
+			wantGroup: true,
 		},
 		{
-			name:        "Regular output",
-			input:       "\x1b_bk;t=1745322210701\x07Cloning into '.'...",
-			wantSection: false,
+			name:      "Regular output",
+			input:     "\x1b_bk;t=1745322210701\x07Cloning into '.'...",
+			wantGroup: false,
 		},
 	}
 
@@ -112,8 +115,8 @@ func TestLogEntryClassification(t *testing.T) {
 				t.Fatalf("ParseLine() error = %v", err)
 			}
 
-			if entry.IsSection() != tt.wantSection {
-				t.Errorf("IsSection() = %v, want %v", entry.IsSection(), tt.wantSection)
+			if entry.IsGroup() != tt.wantGroup {
+				t.Errorf("IsGroup() = %v, want %v", entry.IsGroup(), tt.wantGroup)
 			}
 
 		})
@@ -147,8 +150,8 @@ func TestParseReader(t *testing.T) {
 	if !entries[0].HasTimestamp() {
 		t.Error("First entry should have timestamp")
 	}
-	if !entries[0].IsSection() {
-		t.Error("First entry should be a section")
+	if !entries[0].IsGroup() {
+		t.Error("First entry should be a group")
 	}
 
 	// Check second entry
@@ -168,8 +171,8 @@ func TestParseReader(t *testing.T) {
 	if !entries[3].HasTimestamp() {
 		t.Error("Fourth entry should have timestamp")
 	}
-	if !entries[3].IsSection() {
-		t.Error("Fourth entry should be a section")
+	if !entries[3].IsGroup() {
+		t.Error("Fourth entry should be a group")
 	}
 }
 
@@ -192,8 +195,8 @@ func TestLogIterator(t *testing.T) {
 	if !entry.HasTimestamp() {
 		t.Error("First entry should have timestamp")
 	}
-	if !entry.IsSection() {
-		t.Error("First entry should be a section")
+	if !entry.IsGroup() {
+		t.Error("First entry should be a group")
 	}
 
 	// Test second entry
@@ -225,8 +228,8 @@ func TestLogIterator(t *testing.T) {
 	if !entry.HasTimestamp() {
 		t.Error("Fourth entry should have timestamp")
 	}
-	if !entry.IsSection() {
-		t.Error("Fourth entry should be a section")
+	if !entry.IsGroup() {
+		t.Error("Fourth entry should be a group")
 	}
 
 	// Test end of input
@@ -254,20 +257,81 @@ func TestLogIteratorEmpty(t *testing.T) {
 	}
 }
 
-func TestLogIteratorError(t *testing.T) {
+func TestLogIteratorInvalidTimestamp(t *testing.T) {
 	parser := NewParser()
 
-	// Create a reader that will cause an error after first read
+	// An overflowing timestamp in valid OSC framing should not cause an error;
+	// the line is returned with a zero timestamp and the OSC envelope stripped.
 	input := "\x1b_bk;t=999999999999999999999999999999\x07content"
 	reader := strings.NewReader(input)
 	iterator := parser.NewIterator(reader)
 
-	// This should fail due to invalid timestamp
-	if iterator.Next() {
-		t.Error("Expected Next() to return false due to parse error")
+	if !iterator.Next() {
+		t.Fatal("Expected Next() to return true for invalid timestamp")
 	}
 
-	if iterator.Err() == nil {
-		t.Error("Expected error for invalid timestamp")
+	entry := iterator.Entry()
+	if entry.Content != "content" {
+		t.Errorf("Expected content %q, got %q", "content", entry.Content)
+	}
+	if entry.HasTimestamp() {
+		t.Error("Expected HasTimestamp() to be false")
+	}
+
+	if iterator.Err() != nil {
+		t.Errorf("Unexpected error: %v", iterator.Err())
+	}
+}
+
+func TestComputeFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantTimestamp bool
+		wantGroup     bool
+	}{
+		{
+			name:          "timestamped group header",
+			input:         "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
+			wantTimestamp: true,
+			wantGroup:     true,
+		},
+		{
+			name:          "timestamped regular line",
+			input:         "\x1b_bk;t=1745322209921\x07some output",
+			wantTimestamp: true,
+			wantGroup:     false,
+		},
+		{
+			name:          "plain group header",
+			input:         "~~~ Running global environment hook",
+			wantTimestamp: false,
+			wantGroup:     true,
+		},
+		{
+			name:          "plain regular line",
+			input:         "some output",
+			wantTimestamp: false,
+			wantGroup:     false,
+		},
+	}
+
+	parser := NewParser()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry, err := parser.ParseLine(tt.input)
+			if err != nil {
+				t.Fatalf("ParseLine() error = %v", err)
+			}
+
+			flags := entry.ComputeFlags()
+
+			if flags.Has(HasTimestamp) != tt.wantTimestamp {
+				t.Errorf("HasTimestamp flag = %v, want %v", flags.Has(HasTimestamp), tt.wantTimestamp)
+			}
+			if flags.Has(IsGroup) != tt.wantGroup {
+				t.Errorf("IsGroup flag = %v, want %v", flags.Has(IsGroup), tt.wantGroup)
+			}
+		})
 	}
 }

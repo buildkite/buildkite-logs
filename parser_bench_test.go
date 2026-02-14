@@ -123,7 +123,7 @@ func BenchmarkIteratorWithFiltering(b *testing.B) {
 		name string
 		fn   func(*LogEntry) bool
 	}{
-		{"sections", func(e *LogEntry) bool { return e.IsSection() }},
+		{"sections", func(e *LogEntry) bool { return e.IsGroup() }},
 	}
 
 	for _, filter := range filters {

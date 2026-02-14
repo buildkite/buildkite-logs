@@ -86,3 +86,40 @@ Test output line`
 		t.Fatalf("Expected %d entries, got %d", len(expectedGroups), i)
 	}
 }
+
+func TestGroupTrackingMalformedTimestamp(t *testing.T) {
+	parser := NewParser()
+
+	testData := "\x1b_bk;t=invalid\x07~~~ Setup phase\n" +
+		"\x1b_bk;t=1745322209922\x07some output"
+
+	reader := strings.NewReader(testData)
+
+	var entries []*LogEntry
+	for entry, err := range parser.All(reader) {
+		if err != nil {
+			t.Fatalf("All() error = %v", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	// First entry: malformed timestamp, but group header should still be detected
+	if entries[0].HasTimestamp() {
+		t.Error("first entry should not have timestamp")
+	}
+	if entries[0].Content != "~~~ Setup phase" {
+		t.Errorf("first entry content = %q, want %q", entries[0].Content, "~~~ Setup phase")
+	}
+	if entries[0].Group != "~~~ Setup phase" {
+		t.Errorf("first entry group = %q, want %q", entries[0].Group, "~~~ Setup phase")
+	}
+
+	// Second entry: should inherit group from malformed-timestamp group header
+	if entries[1].Group != "~~~ Setup phase" {
+		t.Errorf("second entry group = %q, want %q", entries[1].Group, "~~~ Setup phase")
+	}
+}

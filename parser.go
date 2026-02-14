@@ -27,12 +27,15 @@ type Parser struct {
 	currentGroup string
 }
 
-// LogIterator provides an iterator interface for processing log entries
+// LogIterator provides an iterator interface for processing log entries.
+//
+// Deprecated: Use Parser.All() which returns an iter.Seq2 instead.
 type LogIterator struct {
-	scanner *bufio.Scanner
-	parser  *Parser
-	current *LogEntry
-	err     error
+	scanner      *bufio.Scanner
+	parser       *Parser
+	currentGroup string
+	current      *LogEntry
+	err          error
 }
 
 // NewParser creates a new Buildkite log parser
@@ -43,7 +46,10 @@ func NewParser() *Parser {
 }
 
 // Reset clears the parser's internal state, useful for reusing the parser
-// for multiple independent parsing operations
+// for multiple independent parsing operations.
+//
+// Deprecated: State isolation is now handled internally by All() and LogIterator.
+// This method will be removed in a future major version.
 func (p *Parser) Reset() {
 	p.currentGroup = ""
 }
@@ -74,7 +80,9 @@ func configureScanner(scanner *bufio.Scanner) {
 	scanner.Buffer(make([]byte, 0, defaultBufferSize), maxBufferSize)
 }
 
-// NewIterator creates a new LogIterator for memory-efficient processing
+// NewIterator creates a new LogIterator for memory-efficient processing.
+//
+// Deprecated: Use Parser.All() which returns an iter.Seq2 instead.
 func (p *Parser) NewIterator(reader io.Reader) *LogIterator {
 	scanner := bufio.NewScanner(reader)
 	configureScanner(scanner)
@@ -99,10 +107,8 @@ func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error] {
 			// Parse line using byte parser directly to avoid state contamination
 			entry, err := p.byteParser.ParseLine(line)
 			if err != nil {
-				if !yield(entry, err) {
-					return
-				}
-				continue
+				yield(nil, err)
+				return
 			}
 
 			// Handle group tracking with local state
@@ -112,50 +118,55 @@ func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error] {
 			entry.Group = localCurrentGroup
 
 			// Yield the processed entry
-			if !yield(entry, err) {
+			if !yield(entry, nil) {
 				return
 			}
 		}
 
 		// Check for scanner errors and yield final error if any
 		if err := scanner.Err(); err != nil {
-			yield(nil, err)
+			_ = yield(nil, err)
 		}
 	}
 }
 
 // Next advances the iterator to the next log entry
 // Returns true if there is a next entry, false if EOF or error
-func (iter *LogIterator) Next() bool {
-	if iter.err != nil {
+func (li *LogIterator) Next() bool {
+	if li.err != nil {
 		return false
 	}
 
-	if !iter.scanner.Scan() {
-		iter.err = iter.scanner.Err()
+	if !li.scanner.Scan() {
+		li.err = li.scanner.Err()
 		return false
 	}
 
-	line := iter.scanner.Text()
-	entry, err := iter.parser.ParseLine(line)
+	line := li.scanner.Text()
+	entry, err := li.parser.byteParser.ParseLine(line)
 	if err != nil {
-		iter.err = err
+		li.err = err
 		return false
 	}
 
-	iter.current = entry
+	if entry.IsGroup() {
+		li.currentGroup = entry.Content
+	}
+	entry.Group = li.currentGroup
+
+	li.current = entry
 	return true
 }
 
 // Entry returns the current log entry
 // Only valid after a successful call to Next()
-func (iter *LogIterator) Entry() *LogEntry {
-	return iter.current
+func (li *LogIterator) Entry() *LogEntry {
+	return li.current
 }
 
 // Err returns any error encountered during iteration
-func (iter *LogIterator) Err() error {
-	return iter.err
+func (li *LogIterator) Err() error {
+	return li.err
 }
 
 // HasTimestamp returns true if the log entry has a valid timestamp
@@ -168,7 +179,7 @@ func (entry *LogEntry) IsGroup() bool {
 	return strings.HasPrefix(entry.Content, "~~~ ") || strings.HasPrefix(entry.Content, "--- ") || strings.HasPrefix(entry.Content, "+++ ")
 }
 
-// IsSection is deprecated, use IsGroup instead
+// Deprecated: IsSection is an alias for IsGroup. Use IsGroup instead.
 func (entry *LogEntry) IsSection() bool {
 	return entry.IsGroup()
 }

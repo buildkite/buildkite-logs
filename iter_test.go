@@ -1,8 +1,10 @@
 package buildkitelogs
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestIterSeq2(t *testing.T) {
@@ -149,5 +151,25 @@ func TestIterSeq2WithFiltering(t *testing.T) {
 		if entry != expectedDollarEntries[i] {
 			t.Errorf("Dollar entry %d: expected %q, got %q", i, expectedDollarEntries[i], entry)
 		}
+	}
+}
+
+func TestAllScannerError(t *testing.T) {
+	parser := NewParser()
+	reader := iotest.ErrReader(fmt.Errorf("disk read failure"))
+
+	var gotErr error
+	for _, err := range parser.All(reader) {
+		if err != nil {
+			gotErr = err
+			break
+		}
+	}
+
+	if gotErr == nil {
+		t.Fatal("expected error from ErrReader, got nil")
+	}
+	if !strings.Contains(gotErr.Error(), "disk read failure") {
+		t.Errorf("expected disk read failure error, got: %v", gotErr)
 	}
 }

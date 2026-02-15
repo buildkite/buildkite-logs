@@ -387,9 +387,10 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 		})
 	}
 
-	// Create local cache file
+	// Create local cache file directly from in-memory data,
+	// avoiding a redundant blob storage read.
 	localCacheStart := time.Now()
-	localPath, err := createLocalCacheFile(ctx, c.blobStorage, blobKey)
+	localPath, err := createLocalCacheFileFromData(parquetData)
 	if err != nil {
 		return "", fmt.Errorf("failed to create local cache file: %w", err)
 	}

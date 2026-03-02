@@ -64,8 +64,8 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.39.1 h1:mLlUgHn02ue8whiR4BmxxGJLR2gw
 github.com/aws/aws-sdk-go-v2/service/sts v1.39.1/go.mod h1:E19xDjpzPZC7LS2knI9E6BaRFDK43Eul7vd6rSq2HWk=
 github.com/aws/smithy-go v1.23.2 h1:Crv0eatJUQhaManss33hS5r40CG3ZFH+21XSkqMrIUM=
 github.com/aws/smithy-go v1.23.2/go.mod h1:LEj2LM3rBRQJxPZTB4KuzZkaZYnZPnvgIhb4pu07mx0=
-github.com/buildkite/go-buildkite/v4 v4.14.1 h1:qAnVhGZWbSxP6JGoysG6Iv0wdVC/0DkpS85wpqcJ080=
-github.com/buildkite/go-buildkite/v4 v4.14.1/go.mod h1:VutoY8MvXYKNLzbobBouiBGHx/UdhBr9K2sWBWNGK+Q=
+github.com/buildkite/go-buildkite/v4 v4.15.0 h1:Te1hwJURaz3l2HMnzWvXaAKmVIRc2VlJS/qVMwAvCbY=
+github.com/buildkite/go-buildkite/v4 v4.15.0/go.mod h1:VutoY8MvXYKNLzbobBouiBGHx/UdhBr9K2sWBWNGK+Q=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=

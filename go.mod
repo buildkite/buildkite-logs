@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/apache/arrow-go/v18 v18.5.1
-	github.com/buildkite/go-buildkite/v4 v4.14.1
+	github.com/buildkite/go-buildkite/v4 v4.15.0
 	gocloud.dev v0.44.0
 )
 

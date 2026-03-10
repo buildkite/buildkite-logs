@@ -42,19 +42,14 @@ func createArrowSchema() *arrow.Schema {
 	}, nil)
 }
 
-// createRecordFromEntries creates an Arrow record from log entries using the writer's builders
-func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.RecordBatch, error) {
-	// String builders reset automatically after NewArray() call
-	// No explicit reset needed for StringBuilder
-
-	// Reserve capacity
+// createRecord creates an Arrow record from log entries using the writer's builders
+func (pw *ParquetWriter) createRecord(entries []*LogEntry) arrow.RecordBatch {
 	numEntries := len(entries)
 	pw.timestampBuilder.Resize(numEntries)
 	pw.contentBuilder.Resize(numEntries)
 	pw.groupBuilder.Resize(numEntries)
 	pw.flagsBuilder.Resize(numEntries)
 
-	// Populate arrays
 	for _, entry := range entries {
 		pw.timestampBuilder.Append(entry.Timestamp.UnixMilli())
 		pw.contentBuilder.Append(entry.Content)
@@ -62,7 +57,6 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 		pw.flagsBuilder.Append(int32(entry.ComputeFlags()))
 	}
 
-	// Build arrays
 	timestampArray := pw.timestampBuilder.NewArray()
 	contentArray := pw.contentBuilder.NewArray()
 	groupArray := pw.groupBuilder.NewArray()
@@ -73,13 +67,12 @@ func (pw *ParquetWriter) createRecordFromEntries(entries []*LogEntry) (arrow.Rec
 	defer groupArray.Release()
 	defer flagsArray.Release()
 
-	// Create record
 	return array.NewRecordBatch(pw.schema, []arrow.Array{
 		timestampArray,
 		contentArray,
 		groupArray,
 		flagsArray,
-	}, int64(numEntries)), nil
+	}, int64(numEntries))
 }
 
 // ParquetWriter provides streaming Parquet writing capabilities
@@ -126,10 +119,7 @@ func (pw *ParquetWriter) WriteBatch(entries []*LogEntry) error {
 		return nil
 	}
 
-	record, err := pw.createRecordFromEntries(entries)
-	if err != nil {
-		return err
-	}
+	record := pw.createRecord(entries)
 	defer record.Release()
 
 	return pw.writer.Write(record)
@@ -148,100 +138,47 @@ func (pw *ParquetWriter) Close() error {
 
 // ExportSeq2ToParquet exports log entries using Go 1.23+ iter.Seq2 for efficient iteration
 func ExportSeq2ToParquet(seq iter.Seq2[*LogEntry, error], filename string) error {
-	// Create output file
+	return ExportSeq2ToParquetWithFilter(seq, filename, nil)
+}
+
+// ExportSeq2ToParquetWithFilter exports filtered log entries using iter.Seq2
+func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*LogEntry, error], filename string, filterFunc func(*LogEntry) bool) error {
 	file, err := os.Create(filename) //nolint:gosec // caller-controlled path
 	if err != nil {
 		return err
 	}
 	defer func() { _ = file.Close() }()
 
-	// Create writer
 	writer, err := NewParquetWriter(file)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = writer.Close() }()
 
-	// Process entries in batches for memory efficiency
 	const batchSize = 10000
 	batch := make([]*LogEntry, 0, batchSize)
 
 	for entry, err := range seq {
-		// Handle errors during iteration
 		if err != nil {
 			return fmt.Errorf("error during iteration: %w", err)
 		}
 
-		batch = append(batch, entry)
-
-		// Write batch when full
-		if len(batch) >= batchSize {
-			err := writer.WriteBatch(batch)
-			if err != nil {
-				return err
-			}
-			batch = batch[:0] // Reset slice
-		}
-	}
-
-	// Write final batch
-	if len(batch) > 0 {
-		err := writer.WriteBatch(batch)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// ExportSeq2ToParquetWithFilter exports filtered log entries using iter.Seq2
-func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*LogEntry, error], filename string, filterFunc func(*LogEntry) bool) error {
-	// Create output file
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	// Create writer
-	writer, err := NewParquetWriter(file)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = writer.Close() }()
-
-	// Process entries in batches for memory efficiency
-	const batchSize = 10000
-	batch := make([]*LogEntry, 0, batchSize)
-
-	for entry, err := range seq {
-		// Handle errors during iteration
-		if err != nil {
-			return fmt.Errorf("error during iteration: %w", err)
-		}
-
-		// Apply filter if provided
 		if filterFunc != nil && !filterFunc(entry) {
 			continue
 		}
 
 		batch = append(batch, entry)
 
-		// Write batch when full
 		if len(batch) >= batchSize {
-			err := writer.WriteBatch(batch)
-			if err != nil {
+			if err := writer.WriteBatch(batch); err != nil {
 				return err
 			}
-			batch = batch[:0] // Reset slice
+			batch = batch[:0]
 		}
 	}
 
-	// Write final batch
 	if len(batch) > 0 {
-		err := writer.WriteBatch(batch)
-		if err != nil {
+		if err := writer.WriteBatch(batch); err != nil {
 			return err
 		}
 	}

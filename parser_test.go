@@ -47,6 +47,13 @@ func TestParseLine(t *testing.T) {
 			wantContent: "",
 			wantHasTs:   true,
 		},
+		{
+			name:        "Invalid OSC timestamp",
+			input:       "\x1b_bk;t=invalid\x07content",
+			wantTs:      0,
+			wantContent: "content",
+			wantHasTs:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -333,5 +340,46 @@ func TestComputeFlags(t *testing.T) {
 				t.Errorf("IsGroup flag = %v, want %v", flags.Has(IsGroup), tt.wantGroup)
 			}
 		})
+	}
+}
+
+func TestParseLineEdgeCases(t *testing.T) {
+	parser := NewParser()
+
+	inputs := []string{
+		"",
+		"a",
+		"\x1b_bk;t=123456",        // OSC start without BEL
+		"\x1b_bk;t=123\x07content\x07more", // OSC with multiple BEL
+		"\x1b_bk;t=9999999999999\x07content", // Large timestamp
+	}
+
+	for _, input := range inputs {
+		entry, err := parser.ParseLine(input)
+		if err != nil {
+			t.Errorf("ParseLine(%q) returned unexpected error: %v", input, err)
+			continue
+		}
+		if entry == nil {
+			t.Errorf("ParseLine(%q) returned nil entry", input)
+		}
+	}
+}
+
+func TestParseLineMultiOSCTruncation(t *testing.T) {
+	parser := NewParser()
+
+	input := "\x1b_bk;t=1745322209921\x07first content\x1b_bk;t=1745322209922\x07second content"
+	entry, err := parser.ParseLine(input)
+	if err != nil {
+		t.Fatalf("ParseLine() error = %v", err)
+	}
+
+	if entry.Content != "first content" {
+		t.Errorf("Content = %q, want %q", entry.Content, "first content")
+	}
+
+	if string(entry.RawLine) != input {
+		t.Errorf("RawLine = %q, want %q", string(entry.RawLine), input)
 	}
 }

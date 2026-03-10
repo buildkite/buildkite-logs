@@ -23,7 +23,6 @@ type LogEntry struct {
 
 // Parser handles parsing of Buildkite log files
 type Parser struct {
-	byteParser   *ByteParser
 	currentGroup string
 }
 
@@ -40,9 +39,7 @@ type LogIterator struct {
 
 // NewParser creates a new Buildkite log parser
 func NewParser() *Parser {
-	return &Parser{
-		byteParser: NewByteParser(),
-	}
+	return &Parser{}
 }
 
 // Reset clears the parser's internal state, useful for reusing the parser
@@ -56,7 +53,7 @@ func (p *Parser) Reset() {
 
 // ParseLine parses a single log line
 func (p *Parser) ParseLine(line string) (*LogEntry, error) {
-	entry, err := p.byteParser.ParseLine(line)
+	entry, err := parseLine(line)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +102,7 @@ func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error] {
 		for scanner.Scan() {
 			line := scanner.Text()
 			// Parse line using byte parser directly to avoid state contamination
-			entry, err := p.byteParser.ParseLine(line)
+			entry, err := parseLine(line)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -143,7 +140,7 @@ func (li *LogIterator) Next() bool {
 	}
 
 	line := li.scanner.Text()
-	entry, err := li.parser.byteParser.ParseLine(line)
+	entry, err := parseLine(line)
 	if err != nil {
 		li.err = err
 		return false

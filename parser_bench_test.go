@@ -250,9 +250,9 @@ func BenchmarkParquetSeq2Export(b *testing.B) {
 	}
 }
 
-// BenchmarkByteParserCore tests the core byte parser performance
-func BenchmarkByteParserCore(b *testing.B) {
-	parser := NewByteParser()
+// BenchmarkParseLineCore tests the core parse performance
+func BenchmarkParseLineCore(b *testing.B) {
+	parser := NewParser()
 
 	testCases := []struct {
 		name string

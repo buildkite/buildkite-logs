@@ -6,16 +6,8 @@ import (
 	"time"
 )
 
-// ByteParser handles byte-level parsing of Buildkite log files
-type ByteParser struct{}
-
-// NewByteParser creates a new byte-based parser
-func NewByteParser() *ByteParser {
-	return &ByteParser{}
-}
-
-// ParseLine parses a single log line using byte scanning
-func (p *ByteParser) ParseLine(line string) (*LogEntry, error) {
+// parseLine parses a single log line using byte scanning
+func parseLine(line string) (*LogEntry, error) {
 	data := []byte(line)
 
 	// Check for OSC sequence: ESC_bk;t=timestamp BEL content

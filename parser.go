@@ -101,7 +101,7 @@ func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error] {
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			// Parse line using byte parser directly to avoid state contamination
+			// Parse line using local state to avoid state contamination
 			entry, err := parseLine(line)
 			if err != nil {
 				yield(nil, err)

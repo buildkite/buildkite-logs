@@ -149,7 +149,7 @@ func (pw *ParquetWriter) Close() error {
 // ExportSeq2ToParquet exports log entries using Go 1.23+ iter.Seq2 for efficient iteration
 func ExportSeq2ToParquet(seq iter.Seq2[*LogEntry, error], filename string) error {
 	// Create output file
-	file, err := os.Create(filename)
+	file, err := os.Create(filename) //nolint:gosec // caller-controlled path
 	if err != nil {
 		return err
 	}

@@ -328,7 +328,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 	}
 
 	// Read the parquet data
-	parquetData, err = os.ReadFile(tempPath)
+	parquetData, err = os.ReadFile(tempPath) //nolint:gosec // path from os.CreateTemp, not user input
 	if err != nil {
 		return "", fmt.Errorf("failed to read parquet data: %w", err)
 	}
@@ -398,7 +398,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 	localCacheDuration := time.Since(localCacheStart)
 
 	var fileSize int64
-	if stat, statErr := os.Stat(localPath); statErr == nil {
+	if stat, statErr := os.Stat(localPath); statErr == nil { //nolint:gosec // path from createLocalCacheFileFromData, not user input
 		fileSize = stat.Size()
 	}
 

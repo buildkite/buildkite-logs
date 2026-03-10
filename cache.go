@@ -41,7 +41,7 @@ func createLocalCacheFileFromData(data []byte) (string, error) {
 	defer cacheFile.Close()
 
 	if _, err := cacheFile.Write(data); err != nil {
-		os.Remove(cacheFile.Name())
+		os.Remove(cacheFile.Name()) //nolint:gosec // path from os.CreateTemp, not user input
 		return "", fmt.Errorf("failed to write local cache file: %w", err)
 	}
 

@@ -56,7 +56,7 @@ func TestDictionaryEncodingAcrossBatches(t *testing.T) {
 
 	// Verify file size - dictionary encoding should make it smaller
 	// than if we used regular string encoding
-	stat, err := os.Stat(tmpFile.Name())
+	stat, err := os.Stat(tmpFile.Name()) //nolint:gosec // path from os.CreateTemp
 	if err != nil {
 		t.Fatalf("Failed to stat file: %v", err)
 	}

@@ -53,7 +53,7 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", subcommand)
+		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", subcommand) //nolint:gosec // CLI tool, not a web context
 		printUsage()
 		os.Exit(1)
 	}

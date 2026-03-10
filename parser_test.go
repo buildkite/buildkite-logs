@@ -349,8 +349,8 @@ func TestParseLineEdgeCases(t *testing.T) {
 	inputs := []string{
 		"",
 		"a",
-		"\x1b_bk;t=123456",        // OSC start without BEL
-		"\x1b_bk;t=123\x07content\x07more", // OSC with multiple BEL
+		"\x1b_bk;t=123456",                   // OSC start without BEL
+		"\x1b_bk;t=123\x07content\x07more",   // OSC with multiple BEL
 		"\x1b_bk;t=9999999999999\x07content", // Large timestamp
 	}
 

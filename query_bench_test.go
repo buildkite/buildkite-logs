@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ func BenchmarkParquetReader_ReadEntriesIter(b *testing.B) {
 		b.Skip("test_logs.parquet not found - run parse command first to generate test data")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	b.ReportAllocs()
 
@@ -39,7 +40,7 @@ func BenchmarkParquetReader_FilterByGroupIter(b *testing.B) {
 		b.Skip("test_logs.parquet not found - run parse command first to generate test data")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	b.ReportAllocs()
 
@@ -67,7 +68,7 @@ func BenchmarkReadParquetFileIter(b *testing.B) {
 
 	for b.Loop() {
 		count := 0
-		for entry, err := range ReadParquetFileIter(testFile) {
+		for entry, err := range ReadParquetFileIter(context.Background(), testFile) {
 			if err != nil {
 				b.Fatalf("ReadParquetFileIter failed: %v", err)
 			}
@@ -87,7 +88,7 @@ func BenchmarkStreamingGroupAnalysis(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -132,7 +133,7 @@ func BenchmarkParquetReaderOperations(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	b.Run("ReadEntriesIter", func(b *testing.B) {
 		for b.Loop() {
@@ -168,7 +169,7 @@ func BenchmarkStreamingMemoryUsage(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	b.Run("StreamingProcessing", func(b *testing.B) {
 		b.ResetTimer()
@@ -194,7 +195,7 @@ func BenchmarkEarlyTermination(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 	targetCount := 100 // Only process first 100 entries
 
 	b.Run("Iterator_StopEarly", func(b *testing.B) {

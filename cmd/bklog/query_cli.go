@@ -289,7 +289,7 @@ func runQuery(ctx context.Context, config *QueryConfig) error {
 		return err
 	}
 
-	reader := buildkitelogs.NewParquetReader(parquetFile)
+	reader := buildkitelogs.NewParquetReader(ctx, parquetFile)
 	return runStreamingQuery(reader, config)
 }
 

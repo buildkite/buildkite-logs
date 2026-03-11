@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -24,7 +25,7 @@ func TestRealWorldStreamingPerformance(t *testing.T) {
 				t.Skipf("Test file %s not found", tf.path)
 			}
 
-			reader := NewParquetReader(tf.path)
+			reader := NewParquetReader(context.Background(), tf.path)
 
 			// Test streaming iterator performance
 			start := time.Now()
@@ -78,7 +79,7 @@ func BenchmarkStreamingFiles(b *testing.B) {
 			b.Skipf("Test file %s not found", tf.path)
 		}
 
-		reader := NewParquetReader(tf.path)
+		reader := NewParquetReader(context.Background(), tf.path)
 
 		b.Run(fmt.Sprintf("%s_StreamingFull", tf.name), func(b *testing.B) {
 			b.ResetTimer()

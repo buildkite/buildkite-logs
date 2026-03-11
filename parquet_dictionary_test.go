@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func TestDictionaryEncodingAcrossBatches(t *testing.T) {
 
 	// Test that we can read the file back
 	var entries []ParquetLogEntry
-	for entry, err := range ReadParquetFileIter(tmpFile.Name()) {
+	for entry, err := range ReadParquetFileIter(context.Background(), tmpFile.Name()) {
 		if err != nil {
 			t.Fatalf("Error reading entries: %v", err)
 		}

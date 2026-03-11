@@ -37,29 +37,29 @@ func main() {
 
 	// Setup hooks for observability
 	buildkiteLogsClient.Hooks().AddAfterCacheCheck(func(ctx context.Context, result *buildkitelogs.CacheCheckResult) {
-		log.Printf("🔍 Cache check for %s: exists=%t, took %v", result.BlobKey, result.Exists, result.Duration)
+		log.Printf("Cache check for %s: exists=%t, took %v", result.BlobKey, result.Exists, result.Duration)
 	})
 
 	buildkiteLogsClient.Hooks().AddAfterJobStatus(func(ctx context.Context, result *buildkitelogs.JobStatusResult) {
-		log.Printf("✅ Job status: %s (terminal: %t) - took %v",
+		log.Printf("Job status: %s (terminal: %t) - took %v",
 			result.JobStatus.State, result.JobStatus.IsTerminal, result.Duration)
 	})
 
 	buildkiteLogsClient.Hooks().AddAfterLogDownload(func(ctx context.Context, result *buildkitelogs.LogDownloadResult) {
-		log.Printf("⬇️  Downloaded %d bytes in %v", result.LogSize, result.Duration)
+		log.Printf("Downloaded %d bytes in %v", result.LogSize, result.Duration)
 	})
 
 	buildkiteLogsClient.Hooks().AddAfterLogParsing(func(ctx context.Context, result *buildkitelogs.LogParsingResult) {
-		log.Printf("🔄 Parsed logs to %d bytes Parquet in %v", result.ParquetSize, result.Duration)
+		log.Printf("Parsed logs to %d bytes Parquet in %v", result.ParquetSize, result.Duration)
 	})
 
 	buildkiteLogsClient.Hooks().AddAfterBlobStorage(func(ctx context.Context, result *buildkitelogs.BlobStorageResult) {
-		log.Printf("💾 Stored %d bytes to blob storage (terminal: %t) in %v",
+		log.Printf("Stored %d bytes to blob storage (terminal: %t) in %v",
 			result.DataSize, result.IsTerminal, result.Duration)
 	})
 
 	buildkiteLogsClient.Hooks().AddAfterLocalCache(func(ctx context.Context, result *buildkitelogs.LocalCacheResult) {
-		log.Printf("📁 Created local cache file %s (%d bytes) in %v",
+		log.Printf("Created local cache file %s (%d bytes) in %v",
 			result.LocalPath, result.FileSize, result.Duration)
 	})
 
@@ -68,22 +68,14 @@ func main() {
 	build := "123"
 	job := "abc-123-def"
 
-	// Example 1: Just download and cache logs
-	fmt.Println("Downloading and caching logs...")
-	filePath, err := buildkiteLogsClient.DownloadAndCache(ctx, org, pipeline, build, job, time.Minute*5, false)
-	if err != nil {
-		log.Printf("Failed to download and cache: %v", err)
-		return
-	}
-	fmt.Printf("Cached to: %s\n", filePath)
-
-	// Example 2: Get a reader and query the logs
+	// Example 1: Get a reader and query the logs
 	fmt.Println("Creating reader and querying logs...")
 	reader, err := buildkiteLogsClient.NewReader(ctx, org, pipeline, build, job, time.Minute*5, false)
 	if err != nil {
 		log.Printf("Failed to create reader: %v", err)
 		return
 	}
+	defer reader.Close()
 
 	// Get file info
 	info, err := reader.GetFileInfo()
@@ -108,7 +100,7 @@ func main() {
 		}
 	}
 
-	// Example 3: Using with custom API implementation
+	// Example 2: Using with custom API implementation
 	fmt.Println("\nExample with custom API:")
 	customAPI := &CustomBuildkiteAPI{} // Your custom implementation
 	customClient, err := buildkitelogs.NewClientWithAPI(ctx, customAPI, storageURL)
@@ -123,6 +115,7 @@ func main() {
 		log.Printf("Failed to create reader with custom API: %v", err)
 		return
 	}
+	defer reader2.Close()
 
 	// Search for specific patterns
 	searchOpts := buildkitelogs.SearchOptions{

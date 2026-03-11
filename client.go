@@ -158,7 +158,8 @@ func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string, 
 	return c, nil
 }
 
-// DownloadAndCache downloads and caches job logs as Parquet format, returning the local file path
+// NewReader downloads and caches job logs (if needed) and returns a ParquetReader for querying.
+// The returned reader owns the underlying temp file; callers must call Close() when done.
 //
 // Parameters:
 //   - org: Buildkite organization slug
@@ -167,34 +168,23 @@ func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string, 
 //   - job: Job ID
 //   - ttl: Time-to-live for cache (use 0 for default 30s)
 //   - forceRefresh: If true, forces re-download even if cache exists
-//
-// Returns the local file path of the cached Parquet file
-func (c *Client) DownloadAndCache(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (string, error) {
+func (c *Client) NewReader(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*ParquetReader, error) {
+	filePath, err := c.downloadAndCache(ctx, org, pipeline, build, job, ttl, forceRefresh)
+	if err != nil {
+		return nil, err
+	}
+
+	return newParquetReaderOwned(ctx, filePath), nil
+}
+
+// downloadAndCache downloads and caches job logs as Parquet format, returning the local file path.
+// Callers are responsible for removing the returned temp file.
+func (c *Client) downloadAndCache(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (string, error) {
 	if err := ValidateAPIParams(org, pipeline, build, job); err != nil {
 		return "", err
 	}
 
 	return c.downloadAndCacheWithBlobStorage(ctx, org, pipeline, build, job, ttl, forceRefresh)
-}
-
-// NewReader downloads and caches job logs (if needed) and returns a ParquetReader for querying
-//
-// Parameters:
-//   - org: Buildkite organization slug
-//   - pipeline: Pipeline slug
-//   - build: Build number or UUID
-//   - job: Job ID
-//   - ttl: Time-to-live for cache (use 0 for default 30s)
-//   - forceRefresh: If true, forces re-download even if cache exists
-//
-// Returns a ParquetReader for querying the log data
-func (c *Client) NewReader(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*ParquetReader, error) {
-	filePath, err := c.DownloadAndCache(ctx, org, pipeline, build, job, ttl, forceRefresh)
-	if err != nil {
-		return nil, err
-	}
-
-	return NewParquetReader(ctx, filePath), nil
 }
 
 // Hooks returns the hooks instance for registering callback functions

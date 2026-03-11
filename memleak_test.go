@@ -91,7 +91,7 @@ func TestClient_HeapStable(t *testing.T) {
 	// Warm up: run a few iterations before measuring so one-time init costs
 	// don't skew the baseline.
 	for range 3 {
-		path, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, true)
+		path, err := client.downloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +105,7 @@ func TestClient_HeapStable(t *testing.T) {
 	runtime.ReadMemStats(&before)
 
 	for i := range iterations {
-		path, err := client.DownloadAndCache(ctx, "org", "pipeline", fmt.Sprintf("%d", i), "job-1", time.Minute, true)
+		path, err := client.downloadAndCache(ctx, "org", "pipeline", fmt.Sprintf("%d", i), "job-1", time.Minute, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +144,7 @@ func TestClient_NoTempFileAccumulation(t *testing.T) {
 
 	returnedPaths := make(map[string]bool, iterations)
 	for i := range iterations {
-		path, err := client.DownloadAndCache(ctx, "org", "pipeline", fmt.Sprintf("%d", i), "job-1", time.Minute, true)
+		path, err := client.downloadAndCache(ctx, "org", "pipeline", fmt.Sprintf("%d", i), "job-1", time.Minute, true)
 		if err != nil {
 			t.Fatal(err)
 		}

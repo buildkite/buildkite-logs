@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,7 @@ func TestParquetWriterMultipleBatches(t *testing.T) {
 	}
 
 	// Verify all 15 entries round-trip
-	reader := NewParquetReader(filename)
+	reader := NewParquetReader(context.Background(), filename)
 	var count int
 	for _, err := range reader.ReadEntriesIter() {
 		if err != nil {
@@ -140,7 +141,7 @@ func TestParquetRoundtrip(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 	var results []ParquetLogEntry
 	for entry, err := range reader.ReadEntriesIter() {
 		if err != nil {
@@ -212,7 +213,7 @@ func TestParquetRoundtripRowNumbers(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 	var rowNumbers []int64
 	for entry, err := range reader.ReadEntriesIter() {
 		if err != nil {
@@ -242,7 +243,7 @@ func TestParquetSeq2Export(t *testing.T) {
 
 	// Verify content round-trips correctly
 	var results []ParquetLogEntry
-	for entry, err := range ReadParquetFileIter(filename) {
+	for entry, err := range ReadParquetFileIter(context.Background(), filename) {
 		if err != nil {
 			t.Fatalf("ReadParquetFileIter error: %v", err)
 		}
@@ -280,7 +281,7 @@ func TestParquetSeq2ExportWithFilter(t *testing.T) {
 
 	// Verify only filtered entries were written
 	var results []ParquetLogEntry
-	for entry, err := range ReadParquetFileIter(filename) {
+	for entry, err := range ReadParquetFileIter(context.Background(), filename) {
 		if err != nil {
 			t.Fatalf("ReadParquetFileIter error: %v", err)
 		}

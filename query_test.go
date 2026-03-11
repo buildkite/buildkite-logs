@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ func TestParquetReader(t *testing.T) {
 	}
 
 	t.Run("NewParquetReader", func(t *testing.T) {
-		reader := NewParquetReader(testFile)
+		reader := NewParquetReader(context.Background(), testFile)
 		if reader == nil {
 			t.Fatal("NewParquetReader returned nil")
 		}
@@ -23,7 +24,7 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("ReadEntriesIter", func(t *testing.T) {
-		reader := NewParquetReader(testFile)
+		reader := NewParquetReader(context.Background(), testFile)
 		entryCount := 0
 		var firstEntry ParquetLogEntry
 
@@ -57,7 +58,7 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("FilterByGroupIter", func(t *testing.T) {
-		reader := NewParquetReader(testFile)
+		reader := NewParquetReader(context.Background(), testFile)
 		entryCount := 0
 
 		for entry, err := range reader.FilterByGroupIter("environment") {
@@ -83,7 +84,7 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("StreamingGroupAnalysis", func(t *testing.T) {
-		reader := NewParquetReader(testFile)
+		reader := NewParquetReader(context.Background(), testFile)
 		groupMap := make(map[string]*GroupInfo)
 		totalEntries := 0
 
@@ -140,7 +141,7 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("EarlyTermination", func(t *testing.T) {
-		reader := NewParquetReader(testFile)
+		reader := NewParquetReader(context.Background(), testFile)
 		targetCount := 5
 		actualCount := 0
 
@@ -285,7 +286,7 @@ func TestReadParquetFileIter(t *testing.T) {
 	entryCount := 0
 	var firstEntry ParquetLogEntry
 
-	for entry, err := range ReadParquetFileIter(testFile) {
+	for entry, err := range ReadParquetFileIter(context.Background(), testFile) {
 		if err != nil {
 			t.Fatalf("ReadParquetFileIter failed: %v", err)
 		}
@@ -316,7 +317,7 @@ func TestReadParquetFileIter(t *testing.T) {
 
 func TestReadParquetFileIterNotFound(t *testing.T) {
 	entryCount := 0
-	for _, err := range ReadParquetFileIter("nonexistent.parquet") {
+	for _, err := range ReadParquetFileIter(context.Background(), "nonexistent.parquet") {
 		if err != nil {
 			// Expected to get an error on the first iteration
 			return
@@ -335,7 +336,7 @@ func TestStreamingPerformance(t *testing.T) {
 		t.Skip("test data not found")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	// Test that we can process entries without loading everything into memory
 	t.Run("MemoryEfficient", func(t *testing.T) {
@@ -440,7 +441,7 @@ func TestReverseSearch(t *testing.T) {
 		t.Fatalf("Failed to create test parquet file: %v", err)
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	t.Run("ForwardSearch", func(t *testing.T) {
 		options := SearchOptions{

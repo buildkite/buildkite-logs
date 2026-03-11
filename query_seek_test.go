@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -11,7 +12,7 @@ func TestParquetReader_GetFileInfo(t *testing.T) {
 		t.Skip("test data not found")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	info, err := reader.GetFileInfo()
 	if err != nil {
@@ -41,7 +42,7 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 		t.Skip("test data not found")
 	}
 
-	reader := NewParquetReader(testFile)
+	reader := NewParquetReader(context.Background(), testFile)
 
 	// Get file info first
 	info, err := reader.GetFileInfo()
@@ -149,7 +150,7 @@ func TestReadParquetFileFromRowIter_Standalone(t *testing.T) {
 
 	// Test seeking to row 0
 	entryCount := 0
-	for entry, err := range readParquetFileFromRowIter(testFile, 0) {
+	for entry, err := range readParquetFileFromRowIter(context.Background(), testFile, 0) {
 		if err != nil {
 			t.Fatalf("readParquetFileFromRowIter failed: %v", err)
 		}

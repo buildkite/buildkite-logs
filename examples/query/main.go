@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -13,7 +14,7 @@ func main() {
 	// Example: Using the ParquetReader to stream query Buildkite logs
 
 	// Create a new reader for your Parquet file
-	reader := buildkitelogs.NewParquetReader("../../test_logs.parquet")
+	reader := buildkitelogs.NewParquetReader(context.Background(), "../../test_logs.parquet")
 
 	fmt.Println("🔍 Buildkite Logs Parquet Streaming Query Example")
 	fmt.Println(strings.Repeat("=", 50))
@@ -92,7 +93,7 @@ func main() {
 	fmt.Println("\n📖 Streaming entries directly from file:")
 	directCount := 0
 
-	for _, err := range buildkitelogs.ReadParquetFileIter("../../test_logs.parquet") {
+	for _, err := range buildkitelogs.ReadParquetFileIter(context.Background(), "../../test_logs.parquet") {
 		if err != nil {
 			log.Fatalf("Failed to read Parquet file: %v", err)
 		}

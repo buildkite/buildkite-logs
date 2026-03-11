@@ -167,7 +167,7 @@ func (c *Client) NewReader(ctx context.Context, org, pipeline, build, job string
 		return nil, err
 	}
 
-	return NewParquetReader(filePath), nil
+	return NewParquetReader(ctx, filePath), nil
 }
 
 // Hooks returns the hooks instance for registering callback functions

@@ -146,19 +146,21 @@ type ParquetFileInfo struct {
 
 // ParquetReader provides functionality to read and query Parquet log files
 type ParquetReader struct {
+	ctx      context.Context
 	filename string
 }
 
 // NewParquetReader creates a new ParquetReader for the specified file
-func NewParquetReader(filename string) *ParquetReader {
+func NewParquetReader(ctx context.Context, filename string) *ParquetReader {
 	return &ParquetReader{
+		ctx:      ctx,
 		filename: filename,
 	}
 }
 
 // ReadEntriesIter returns an iterator over log entries from the Parquet file
 func (pr *ParquetReader) ReadEntriesIter() iter.Seq2[ParquetLogEntry, error] {
-	return readParquetFileIter(pr.filename)
+	return readParquetFileIter(pr.ctx, pr.filename)
 }
 
 // FilterByGroupIter returns an iterator over entries that belong to groups matching the specified name pattern
@@ -168,7 +170,7 @@ func (pr *ParquetReader) FilterByGroupIter(groupPattern string) iter.Seq2[Parque
 
 // SeekToRow returns an iterator starting from the specified row number (0-based)
 func (pr *ParquetReader) SeekToRow(startRow int64) iter.Seq2[ParquetLogEntry, error] {
-	return readParquetFileFromRowIter(pr.filename, startRow)
+	return readParquetFileFromRowIter(pr.ctx, pr.filename, startRow)
 }
 
 // GetFileInfo returns metadata about the Parquet file
@@ -178,21 +180,21 @@ func (pr *ParquetReader) GetFileInfo() (*ParquetFileInfo, error) {
 
 // SearchEntriesIter returns an iterator over search results with context
 func (pr *ParquetReader) SearchEntriesIter(options SearchOptions) iter.Seq2[SearchResult, error] {
-	return searchParquetFileIter(pr.filename, options)
+	return searchParquetFileIter(pr.ctx, pr.filename, options)
 }
 
 // ReadParquetFileIter is a convenience function to get an iterator over entries from a Parquet file
-func ReadParquetFileIter(filename string) iter.Seq2[ParquetLogEntry, error] {
-	return readParquetFileIter(filename)
+func ReadParquetFileIter(ctx context.Context, filename string) iter.Seq2[ParquetLogEntry, error] {
+	return readParquetFileIter(ctx, filename)
 }
 
 // readParquetFileIter reads a Parquet file and returns an iterator over log entries using streaming
-func readParquetFileIter(filename string) iter.Seq2[ParquetLogEntry, error] {
-	return readParquetFileStreamingIter(filename, 5000) // Use 5000 as default batch size
+func readParquetFileIter(ctx context.Context, filename string) iter.Seq2[ParquetLogEntry, error] {
+	return readParquetFileStreamingIter(ctx, filename, 5000) // Use 5000 as default batch size
 }
 
 // readParquetFileStreamingIter reads a Parquet file using GetRecordReader for true streaming
-func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[ParquetLogEntry, error] {
+func readParquetFileStreamingIter(ctx context.Context, filename string, batchSize int64) iter.Seq2[ParquetLogEntry, error] {
 	return func(yield func(ParquetLogEntry, error) bool) {
 		// Resource management with proper cleanup order
 		resources := make([]func(), 0)
@@ -222,7 +224,6 @@ func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[Pa
 		resources = append(resources, func() { _ = pf.Close() })
 
 		// Create an Arrow file reader with streaming configuration
-		ctx := context.Background()
 		arrowReader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{
 			BatchSize: batchSize, // Configure batch size for streaming
 		}, pool)
@@ -245,6 +246,12 @@ func readParquetFileStreamingIter(filename string, batchSize int64) iter.Seq2[Pa
 
 		// Stream records in batches
 		for {
+			// Check for context cancellation between batches
+			if err := ctx.Err(); err != nil {
+				yield(ParquetLogEntry{}, err)
+				return
+			}
+
 			record, err := recordReader.Read()
 			if err != nil {
 				if err == io.EOF {
@@ -463,7 +470,7 @@ func getParquetFileInfo(filename string) (*ParquetFileInfo, error) {
 }
 
 // readParquetFileFromRowIter reads a Parquet file starting from a specific row
-func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[ParquetLogEntry, error] {
+func readParquetFileFromRowIter(ctx context.Context, filename string, startRow int64) iter.Seq2[ParquetLogEntry, error] {
 	return func(yield func(ParquetLogEntry, error) bool) {
 		// Resource management with proper cleanup order
 		resources := make([]func(), 0)
@@ -500,7 +507,6 @@ func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[Parqu
 		}
 
 		// Create an Arrow file reader
-		ctx := context.Background()
 		arrowReader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{
 			BatchSize: 5000, // Default batch size
 		}, pool)
@@ -577,7 +583,7 @@ func readParquetFileFromRowIter(filename string, startRow int64) iter.Seq2[Parqu
 }
 
 // searchParquetFileIter implements streaming search with context
-func searchParquetFileIter(filename string, options SearchOptions) iter.Seq2[SearchResult, error] {
+func searchParquetFileIter(ctx context.Context, filename string, options SearchOptions) iter.Seq2[SearchResult, error] {
 	return func(yield func(SearchResult, error) bool) {
 		// Compile regex pattern
 		regex, err := compileRegexPattern(options.Pattern, options.CaseSensitive)
@@ -596,17 +602,17 @@ func searchParquetFileIter(filename string, options SearchOptions) iter.Seq2[Sea
 
 		// Handle reverse search by collecting all entries first
 		if options.Reverse {
-			searchReverseParquetFileIter(filename, options, regex, beforeContext, afterContext, yield)
+			searchReverseParquetFileIter(ctx, filename, options, regex, beforeContext, afterContext, yield)
 			return
 		}
 
 		// Forward search (original implementation)
-		searchForwardParquetFileIter(filename, options, regex, beforeContext, afterContext, yield)
+		searchForwardParquetFileIter(ctx, filename, options, regex, beforeContext, afterContext, yield)
 	}
 }
 
 // searchForwardParquetFileIter implements forward search (original behavior)
-func searchForwardParquetFileIter(filename string, options SearchOptions, regex *regexp.Regexp, beforeContext, afterContext int, yield func(SearchResult, error) bool) {
+func searchForwardParquetFileIter(ctx context.Context, filename string, options SearchOptions, regex *regexp.Regexp, beforeContext, afterContext int, yield func(SearchResult, error) bool) {
 	// Stream entries and perform search with context buffering
 	var beforeBuffer []ParquetLogEntry
 	var afterCollecting int
@@ -616,10 +622,10 @@ func searchForwardParquetFileIter(filename string, options SearchOptions, regex 
 	// Determine starting iterator
 	var entryIter iter.Seq2[ParquetLogEntry, error]
 	if options.SeekStart > 0 {
-		entryIter = readParquetFileFromRowIter(filename, options.SeekStart)
+		entryIter = readParquetFileFromRowIter(ctx, filename, options.SeekStart)
 		totalEntries = options.SeekStart
 	} else {
-		entryIter = readParquetFileIter(filename)
+		entryIter = readParquetFileIter(ctx, filename)
 	}
 
 	for entry, err := range entryIter {
@@ -686,12 +692,12 @@ func searchForwardParquetFileIter(filename string, options SearchOptions, regex 
 }
 
 // searchReverseParquetFileIter implements reverse search by collecting entries first
-func searchReverseParquetFileIter(filename string, options SearchOptions, regex *regexp.Regexp, beforeContext, afterContext int, yield func(SearchResult, error) bool) {
+func searchReverseParquetFileIter(ctx context.Context, filename string, options SearchOptions, regex *regexp.Regexp, beforeContext, afterContext int, yield func(SearchResult, error) bool) {
 	// First, collect all entries into a slice
 	var allEntries []ParquetLogEntry
 
 	// For reverse search, we always need to read all entries first
-	entryIter := readParquetFileIter(filename)
+	entryIter := readParquetFileIter(ctx, filename)
 
 	for entry, err := range entryIter {
 		if err != nil {

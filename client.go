@@ -2,6 +2,7 @@ package buildkitelogs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,24 @@ import (
 
 	"github.com/buildkite/go-buildkite/v4"
 )
+
+// ErrLogTooLarge is returned when a job log exceeds the configured maximum size.
+var ErrLogTooLarge = errors.New("log exceeds maximum allowed size")
+
+// DefaultMaxLogBytes is the default maximum log size (10MB).
+const DefaultMaxLogBytes int64 = 10 * 1024 * 1024
+
+// ClientOption configures a Client.
+type ClientOption func(*Client)
+
+// WithMaxLogBytes sets the maximum number of log bytes that will be downloaded
+// and processed. Logs exceeding this limit will return ErrLogTooLarge.
+// Set to 0 to disable the limit. Default is 10MB.
+func WithMaxLogBytes(n int64) ClientOption {
+	return func(c *Client) {
+		c.maxLogBytes = n
+	}
+}
 
 // Hook function types for different stages of downloadAndCacheWithBlobStorage
 type AfterCacheCheckFunc func(ctx context.Context, result *CacheCheckResult)
@@ -107,28 +126,36 @@ type Client struct {
 	storageURL  string
 	blobStorage *BlobStorage
 	hooks       *Hooks
+	maxLogBytes int64 // 0 means no limit
 }
 
 // NewClient creates a new Client using the provided go-buildkite client
-func NewClient(ctx context.Context, client *buildkite.Client, storageURL string) (*Client, error) {
+func NewClient(ctx context.Context, client *buildkite.Client, storageURL string, opts ...ClientOption) (*Client, error) {
 	api := NewBuildkiteAPIExistingClient(client)
-	return NewClientWithAPI(ctx, api, storageURL)
+	return NewClientWithAPI(ctx, api, storageURL, opts...)
 }
 
 // NewClientWithAPI creates a new Client using a custom BuildkiteAPI implementation
-func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string) (*Client, error) {
+func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string, opts ...ClientOption) (*Client, error) {
 	// Initialize blob storage once during client creation
 	blobStorage, err := NewBlobStorage(ctx, storageURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize blob storage: %w", err)
 	}
 
-	return &Client{
+	c := &Client{
 		api:         api,
 		storageURL:  storageURL,
 		blobStorage: blobStorage,
 		hooks:       &Hooks{},
-	}, nil
+		maxLogBytes: DefaultMaxLogBytes,
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c, nil
 }
 
 // DownloadAndCache downloads and caches job logs as Parquet format, returning the local file path
@@ -268,6 +295,20 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 					logSize = 0
 				}
 			}
+		}
+	}
+
+	// Enforce max log size limit
+	if c.maxLogBytes > 0 {
+		// If we know the size upfront, fail fast
+		if logSize > c.maxLogBytes {
+			return "", fmt.Errorf("%w: %d bytes exceeds limit of %d bytes", ErrLogTooLarge, logSize, c.maxLogBytes)
+		}
+		// Wrap reader to enforce limit during streaming
+		logReader = &limitedReadCloser{
+			rc:    logReader,
+			r:     io.LimitReader(logReader, c.maxLogBytes+1),
+			limit: c.maxLogBytes,
 		}
 	}
 
@@ -418,6 +459,28 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 	}
 
 	return localPath, nil
+}
+
+// limitedReadCloser wraps a reader with a size limit, returning ErrLogTooLarge
+// if the limit is exceeded during reading.
+type limitedReadCloser struct {
+	rc       io.ReadCloser
+	r        io.Reader // LimitReader set to limit+1
+	limit    int64
+	consumed int64
+}
+
+func (l *limitedReadCloser) Read(p []byte) (int, error) {
+	n, err := l.r.Read(p)
+	l.consumed += int64(n)
+	if l.consumed > l.limit {
+		return n, fmt.Errorf("%w: exceeded limit of %d bytes", ErrLogTooLarge, l.limit)
+	}
+	return n, err
+}
+
+func (l *limitedReadCloser) Close() error {
+	return l.rc.Close()
 }
 
 // Close closes the underlying blob storage connection

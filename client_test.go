@@ -283,3 +283,69 @@ func TestClient_Close(t *testing.T) {
 		t.Errorf("Close: %v", err)
 	}
 }
+
+func TestClient_DefaultMaxLogBytes(t *testing.T) {
+	mock := newTerminalMock()
+	client := newTestClient(t, mock)
+
+	if client.maxLogBytes != DefaultMaxLogBytes {
+		t.Errorf("maxLogBytes = %d, want %d", client.maxLogBytes, DefaultMaxLogBytes)
+	}
+}
+
+func TestClient_WithMaxLogBytes(t *testing.T) {
+	mock := newTerminalMock()
+	client := newTestClient(t, mock, WithMaxLogBytes(1024))
+
+	if client.maxLogBytes != 1024 {
+		t.Errorf("maxLogBytes = %d, want 1024", client.maxLogBytes)
+	}
+}
+
+func TestClient_WithMaxLogBytes_Zero_DisablesLimit(t *testing.T) {
+	mock := newTerminalMock()
+	client := newTestClient(t, mock, WithMaxLogBytes(0))
+
+	if client.maxLogBytes != 0 {
+		t.Errorf("maxLogBytes = %d, want 0", client.maxLogBytes)
+	}
+
+	// Should succeed with no limit
+	_, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("DownloadAndCache with no limit: %v", err)
+	}
+}
+
+func TestClient_DownloadAndCache_LogTooLarge(t *testing.T) {
+	mock := &mockBuildkiteAPI{
+		logContent: strings.Repeat("x", 1024), // 1KB log
+		jobStatus: &JobStatus{
+			ID:         "test-job",
+			State:      JobStatePassed,
+			IsTerminal: true,
+		},
+	}
+	client := newTestClient(t, mock, WithMaxLogBytes(100)) // 100 byte limit
+
+	_, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err == nil {
+		t.Fatal("expected ErrLogTooLarge, got nil")
+	}
+	if !errors.Is(err, ErrLogTooLarge) {
+		t.Errorf("expected ErrLogTooLarge, got: %v", err)
+	}
+}
+
+func TestClient_DownloadAndCache_LogWithinLimit(t *testing.T) {
+	mock := newTerminalMock()                                    // small log content
+	client := newTestClient(t, mock, WithMaxLogBytes(1024*1024)) // 1MB limit
+
+	path, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("DownloadAndCache: %v", err)
+	}
+	if path == "" {
+		t.Fatal("expected non-empty path")
+	}
+}

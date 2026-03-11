@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +111,7 @@ func TestClient_DownloadAndCache_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadAndCache: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path) })
 
 	if path == "" {
 		t.Fatal("expected non-empty file path")
@@ -132,18 +134,20 @@ func TestClient_DownloadAndCache_CacheHit(t *testing.T) {
 	ctx := t.Context()
 
 	// First call downloads
-	_, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	path1, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("first DownloadAndCache: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path1) })
 
 	initialLogCalls := mock.getLogCalls
 
 	// Second call should use cache (terminal job)
-	_, err = client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	path2, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("second DownloadAndCache: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path2) })
 
 	if mock.getLogCalls != initialLogCalls {
 		t.Errorf("expected no additional log downloads on cache hit, got %d extra calls", mock.getLogCalls-initialLogCalls)
@@ -156,18 +160,20 @@ func TestClient_DownloadAndCache_ForceRefresh(t *testing.T) {
 	ctx := t.Context()
 
 	// First call downloads
-	_, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	path1, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("first DownloadAndCache: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path1) })
 
 	initialLogCalls := mock.getLogCalls
 
 	// Force refresh should re-download
-	_, err = client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, true)
+	path2, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, true)
 	if err != nil {
 		t.Fatalf("force refresh DownloadAndCache: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path2) })
 
 	if mock.getLogCalls == initialLogCalls {
 		t.Error("expected additional log download on force refresh")
@@ -222,10 +228,11 @@ func TestClient_DownloadAndCache_Hooks(t *testing.T) {
 		}
 	})
 
-	_, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	path, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("DownloadAndCache: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path) })
 
 	if !cacheCheckCalled {
 		t.Error("AfterCacheCheck hook not called")
@@ -311,10 +318,11 @@ func TestClient_WithMaxLogBytes_Zero_DisablesLimit(t *testing.T) {
 	}
 
 	// Should succeed with no limit
-	_, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	path, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("DownloadAndCache with no limit: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path) })
 }
 
 func TestClient_DownloadAndCache_LogTooLarge(t *testing.T) {
@@ -345,6 +353,7 @@ func TestClient_DownloadAndCache_LogWithinLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadAndCache: %v", err)
 	}
+	t.Cleanup(func() { os.Remove(path) })
 	if path == "" {
 		t.Fatal("expected non-empty path")
 	}

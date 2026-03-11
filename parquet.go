@@ -91,7 +91,12 @@ type ParquetWriter struct {
 
 // NewParquetWriter creates a new Parquet writer for streaming
 func NewParquetWriter(file *os.File) (*ParquetWriter, error) {
-	pool := memory.NewGoAllocator()
+	return newParquetWriterWithPool(file, memory.NewGoAllocator())
+}
+
+// newParquetWriterWithPool creates a ParquetWriter using the provided allocator.
+// Used in tests to inject a memory.NewCheckedAllocator for leak detection.
+func newParquetWriterWithPool(file *os.File, pool memory.Allocator) (*ParquetWriter, error) {
 	schema := createArrowSchema()
 
 	writer, err := createNewFileWriter(schema, file, pool)

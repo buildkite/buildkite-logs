@@ -2,6 +2,7 @@ package buildkitelogs
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -39,10 +40,10 @@ func newTerminalMock() *mockBuildkiteAPI {
 	}
 }
 
-func newTestClient(t *testing.T, mock *mockBuildkiteAPI) *Client {
+func newTestClient(t *testing.T, mock *mockBuildkiteAPI, opts ...ClientOption) *Client {
 	t.Helper()
 	tempDir := t.TempDir()
-	client, err := NewClientWithAPI(context.Background(), mock, "file://"+tempDir)
+	client, err := NewClientWithAPI(t.Context(), mock, "file://"+tempDir, opts...)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestClient_NewClient(t *testing.T) {
 	tempDir := t.TempDir()
 	storageURL := "file://" + tempDir
 
-	c, err := NewClient(context.Background(), client, storageURL)
+	c, err := NewClient(t.Context(), client, storageURL)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestClient_NewClientWithAPI(t *testing.T) {
 func TestClient_DownloadAndCache_Validation(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name                      string
@@ -103,7 +104,7 @@ func TestClient_DownloadAndCache_Validation(t *testing.T) {
 func TestClient_DownloadAndCache_HappyPath(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	path, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
@@ -128,7 +129,7 @@ func TestClient_DownloadAndCache_HappyPath(t *testing.T) {
 func TestClient_DownloadAndCache_CacheHit(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// First call downloads
 	_, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
@@ -152,7 +153,7 @@ func TestClient_DownloadAndCache_CacheHit(t *testing.T) {
 func TestClient_DownloadAndCache_ForceRefresh(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// First call downloads
 	_, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
@@ -176,7 +177,7 @@ func TestClient_DownloadAndCache_ForceRefresh(t *testing.T) {
 func TestClient_DownloadAndCache_Hooks(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var (
 		cacheCheckCalled  bool
@@ -249,7 +250,7 @@ func TestClient_DownloadAndCache_Hooks(t *testing.T) {
 func TestClient_NewReader(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reader, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
@@ -273,7 +274,7 @@ func TestClient_NewReader(t *testing.T) {
 func TestClient_Close(t *testing.T) {
 	mock := newTerminalMock()
 	tempDir := t.TempDir()
-	client, err := NewClientWithAPI(context.Background(), mock, "file://"+tempDir)
+	client, err := NewClientWithAPI(t.Context(), mock, "file://"+tempDir)
 	if err != nil {
 		t.Fatalf("NewClientWithAPI: %v", err)
 	}

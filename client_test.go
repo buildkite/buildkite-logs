@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +76,7 @@ func TestClient_NewClientWithAPI(t *testing.T) {
 	}
 }
 
-func TestClient_DownloadAndCache_Validation(t *testing.T) {
+func TestClient_NewReader_Validation(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
 	ctx := t.Context()
@@ -94,7 +93,7 @@ func TestClient_DownloadAndCache_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.DownloadAndCache(ctx, tt.org, tt.pipeline, tt.build, tt.job, time.Minute, false)
+			_, err := client.NewReader(ctx, tt.org, tt.pipeline, tt.build, tt.job, time.Minute, false)
 			if err == nil {
 				t.Error("expected validation error")
 			}
@@ -102,23 +101,18 @@ func TestClient_DownloadAndCache_Validation(t *testing.T) {
 	}
 }
 
-func TestClient_DownloadAndCache_HappyPath(t *testing.T) {
+func TestClient_NewReader_HappyPath(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
 	ctx := t.Context()
 
-	path, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	reader, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
-		t.Fatalf("DownloadAndCache: %v", err)
+		t.Fatalf("NewReader: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path) })
-
-	if path == "" {
-		t.Fatal("expected non-empty file path")
-	}
+	defer reader.Close()
 
 	// Verify the file is a valid parquet file
-	reader := NewParquetReader(ctx, path)
 	info, err := reader.GetFileInfo()
 	if err != nil {
 		t.Fatalf("GetFileInfo: %v", err)
@@ -128,59 +122,59 @@ func TestClient_DownloadAndCache_HappyPath(t *testing.T) {
 	}
 }
 
-func TestClient_DownloadAndCache_CacheHit(t *testing.T) {
+func TestClient_NewReader_CacheHit(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
 	ctx := t.Context()
 
 	// First call downloads
-	path1, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	reader1, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
-		t.Fatalf("first DownloadAndCache: %v", err)
+		t.Fatalf("first NewReader: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path1) })
+	defer reader1.Close()
 
 	initialLogCalls := mock.getLogCalls
 
 	// Second call should use cache (terminal job)
-	path2, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	reader2, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
-		t.Fatalf("second DownloadAndCache: %v", err)
+		t.Fatalf("second NewReader: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path2) })
+	defer reader2.Close()
 
 	if mock.getLogCalls != initialLogCalls {
 		t.Errorf("expected no additional log downloads on cache hit, got %d extra calls", mock.getLogCalls-initialLogCalls)
 	}
 }
 
-func TestClient_DownloadAndCache_ForceRefresh(t *testing.T) {
+func TestClient_NewReader_ForceRefresh(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
 	ctx := t.Context()
 
 	// First call downloads
-	path1, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	reader1, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
-		t.Fatalf("first DownloadAndCache: %v", err)
+		t.Fatalf("first NewReader: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path1) })
+	defer reader1.Close()
 
 	initialLogCalls := mock.getLogCalls
 
 	// Force refresh should re-download
-	path2, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, true)
+	reader2, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, true)
 	if err != nil {
-		t.Fatalf("force refresh DownloadAndCache: %v", err)
+		t.Fatalf("force refresh NewReader: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path2) })
+	defer reader2.Close()
 
 	if mock.getLogCalls == initialLogCalls {
 		t.Error("expected additional log download on force refresh")
 	}
 }
 
-func TestClient_DownloadAndCache_Hooks(t *testing.T) {
+func TestClient_NewReader_Hooks(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
 	ctx := t.Context()
@@ -228,11 +222,11 @@ func TestClient_DownloadAndCache_Hooks(t *testing.T) {
 		}
 	})
 
-	path, err := client.DownloadAndCache(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	reader, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
-		t.Fatalf("DownloadAndCache: %v", err)
+		t.Fatalf("NewReader: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path) })
+	defer reader.Close()
 
 	if !cacheCheckCalled {
 		t.Error("AfterCacheCheck hook not called")
@@ -254,7 +248,7 @@ func TestClient_DownloadAndCache_Hooks(t *testing.T) {
 	}
 }
 
-func TestClient_NewReader(t *testing.T) {
+func TestClient_NewReader_ReadEntries(t *testing.T) {
 	mock := newTerminalMock()
 	client := newTestClient(t, mock)
 	ctx := t.Context()
@@ -263,6 +257,7 @@ func TestClient_NewReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReader: %v", err)
 	}
+	defer reader.Close()
 
 	// Verify we can read entries from the reader
 	count := 0
@@ -318,14 +313,14 @@ func TestClient_WithMaxLogBytes_Zero_DisablesLimit(t *testing.T) {
 	}
 
 	// Should succeed with no limit
-	path, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
-		t.Fatalf("DownloadAndCache with no limit: %v", err)
+		t.Fatalf("NewReader with no limit: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path) })
+	defer reader.Close()
 }
 
-func TestClient_DownloadAndCache_LogTooLarge(t *testing.T) {
+func TestClient_NewReader_LogTooLarge(t *testing.T) {
 	mock := &mockBuildkiteAPI{
 		logContent: strings.Repeat("x", 1024), // 1KB log
 		jobStatus: &JobStatus{
@@ -336,7 +331,7 @@ func TestClient_DownloadAndCache_LogTooLarge(t *testing.T) {
 	}
 	client := newTestClient(t, mock, WithMaxLogBytes(100)) // 100 byte limit
 
-	_, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	_, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err == nil {
 		t.Fatal("expected ErrLogTooLarge, got nil")
 	}
@@ -345,16 +340,13 @@ func TestClient_DownloadAndCache_LogTooLarge(t *testing.T) {
 	}
 }
 
-func TestClient_DownloadAndCache_LogWithinLimit(t *testing.T) {
+func TestClient_NewReader_LogWithinLimit(t *testing.T) {
 	mock := newTerminalMock()                                    // small log content
 	client := newTestClient(t, mock, WithMaxLogBytes(1024*1024)) // 1MB limit
 
-	path, err := client.DownloadAndCache(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
-		t.Fatalf("DownloadAndCache: %v", err)
+		t.Fatalf("NewReader: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(path) })
-	if path == "" {
-		t.Fatal("expected non-empty path")
-	}
+	defer reader.Close()
 }

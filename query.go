@@ -148,14 +148,35 @@ type ParquetFileInfo struct {
 type ParquetReader struct {
 	ctx      context.Context
 	filename string
+	owned    bool // if true, Close() removes the file (it's a temp file we created)
 }
 
-// NewParquetReader creates a new ParquetReader for the specified file
+// NewParquetReader creates a new ParquetReader for the specified file.
+// The caller retains ownership of the file; Close() is a no-op.
 func NewParquetReader(ctx context.Context, filename string) *ParquetReader {
 	return &ParquetReader{
 		ctx:      ctx,
 		filename: filename,
 	}
+}
+
+// newParquetReaderOwned creates a ParquetReader that owns the underlying file.
+// Close() will remove the file.
+func newParquetReaderOwned(ctx context.Context, filename string) *ParquetReader {
+	return &ParquetReader{
+		ctx:      ctx,
+		filename: filename,
+		owned:    true,
+	}
+}
+
+// Close cleans up resources. If the reader owns the file (created via Client.NewReader),
+// Close removes the temporary file. For readers created via NewParquetReader, Close is a no-op.
+func (pr *ParquetReader) Close() error {
+	if pr.owned {
+		return os.Remove(pr.filename)
+	}
+	return nil
 }
 
 // ReadEntriesIter returns an iterator over log entries from the Parquet file

@@ -283,47 +283,46 @@ type QueryConfig struct {
 
 // runQuery executes a query using streaming iterators
 func runQuery(ctx context.Context, config *QueryConfig) error {
-	// Resolve the parquet file path
-	parquetFile, err := resolveParquetFilePath(ctx, config)
+	reader, err := resolveReader(ctx, config)
 	if err != nil {
 		return err
 	}
+	defer reader.Close()
 
-	reader := buildkitelogs.NewParquetReader(ctx, parquetFile)
 	return runStreamingQuery(reader, config)
 }
 
-// resolveParquetFilePath determines the parquet file path to use
-func resolveParquetFilePath(ctx context.Context, config *QueryConfig) (string, error) {
-	// If file path is provided directly, use it
+// resolveReader creates a ParquetReader from either a local file or the Buildkite API.
+func resolveReader(ctx context.Context, config *QueryConfig) (*buildkitelogs.ParquetReader, error) {
+	// If file path is provided directly, use it (non-owned reader)
 	if config.ParquetFile != "" {
-		return config.ParquetFile, nil
+		return buildkitelogs.NewParquetReader(ctx, config.ParquetFile), nil
 	}
 
 	// If API parameters are provided, download and cache using high-level client
 	if config.Organization != "" && config.Pipeline != "" && config.Build != "" && config.Job != "" {
 		apiToken := os.Getenv("BUILDKITE_API_TOKEN")
 		if apiToken == "" {
-			return "", fmt.Errorf("BUILDKITE_API_TOKEN environment variable is required for API access")
+			return nil, fmt.Errorf("BUILDKITE_API_TOKEN environment variable is required for API access")
 		}
 
 		// Create buildkite client and high-level client
 		buildkiteClient := buildkitelogs.NewBuildkiteAPIClient(apiToken, version)
 		client, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteClient, config.CacheURL)
 		if err != nil {
-			return "", fmt.Errorf("failed to create client: %w", err)
+			return nil, fmt.Errorf("failed to create client: %w", err)
 		}
 		defer client.Close()
 
-		cacheFilePath, err := client.DownloadAndCache(ctx, config.Organization, config.Pipeline, config.Build, config.Job, config.CacheTTL, config.ForceRefresh)
+		reader, err := client.NewReader(ctx, config.Organization, config.Pipeline, config.Build, config.Job, config.CacheTTL, config.ForceRefresh)
 		if err != nil {
-			return "", fmt.Errorf("failed to download and cache logs: %w", err)
+			return nil, fmt.Errorf("failed to download and cache logs: %w", err)
 		}
 
-		return cacheFilePath, nil
+		return reader, nil
 	}
 
-	return "", fmt.Errorf("either -file or API parameters must be provided")
+	return nil, fmt.Errorf("either -file or API parameters must be provided")
 }
 
 // runStreamingQuery executes streaming queries for memory efficiency

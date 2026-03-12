@@ -41,11 +41,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("🚀 Buildkite Smart Caching Example")
+	fmt.Println("Buildkite Smart Caching Example")
 	fmt.Println(strings.Repeat("=", 50))
 
 	// Example 1: Default smart caching using high-level Client (30s TTL, auto storage)
-	fmt.Println("\n📦 Example 1: Default smart caching with high-level Client")
+	fmt.Println("\nExample 1: Default smart caching with high-level Client")
 	fmt.Println("- 30-second TTL for non-terminal jobs")
 	fmt.Println("- Permanent cache for terminal jobs")
 	fmt.Println("- Auto storage backend selection")
@@ -61,7 +61,7 @@ func main() {
 	defer client.Close()
 
 	start := time.Now()
-	cacheFile1, err := client.DownloadAndCache(
+	reader1, err := client.NewReader(
 		ctx,
 		*org, *pipeline, *build, *job,
 		30*time.Second, // TTL for non-terminal jobs
@@ -70,13 +70,14 @@ func main() {
 	if err != nil {
 		log.Printf("Cache operation failed: %v", err)
 	} else {
-		fmt.Printf("✅ First download: %s (took %v)\n", cacheFile1, time.Since(start))
+		fmt.Printf("First download took %v\n", time.Since(start))
+		reader1.Close()
 	}
 
 	// Example 2: Immediate second call (should use cache)
-	fmt.Println("\n⚡ Example 2: Immediate second call (cache hit)")
+	fmt.Println("\nExample 2: Immediate second call (cache hit)")
 	start = time.Now()
-	cacheFile2, err := client.DownloadAndCache(
+	reader2, err := client.NewReader(
 		ctx,
 		*org, *pipeline, *build, *job,
 		30*time.Second, false,
@@ -84,14 +85,15 @@ func main() {
 	if err != nil {
 		log.Printf("Cache operation failed: %v", err)
 	} else {
-		fmt.Printf("✅ Second download: %s (took %v)\n", cacheFile2, time.Since(start))
-		fmt.Println("   → Should be much faster due to cache hit!")
+		fmt.Printf("Second call took %v\n", time.Since(start))
+		fmt.Println("   -> Should be much faster due to cache hit!")
+		reader2.Close()
 	}
 
 	// Example 3: Force refresh
-	fmt.Println("\n🔄 Example 3: Force refresh (bypass cache)")
+	fmt.Println("\nExample 3: Force refresh (bypass cache)")
 	start = time.Now()
-	cacheFile3, err := client.DownloadAndCache(
+	reader3, err := client.NewReader(
 		ctx,
 		*org, *pipeline, *build, *job,
 		30*time.Second, true, // force refresh = true
@@ -99,12 +101,13 @@ func main() {
 	if err != nil {
 		log.Printf("Cache operation failed: %v", err)
 	} else {
-		fmt.Printf("✅ Force refresh: %s (took %v)\n", cacheFile3, time.Since(start))
-		fmt.Println("   → Bypassed cache and downloaded fresh logs")
+		fmt.Printf("Force refresh took %v\n", time.Since(start))
+		fmt.Println("   -> Bypassed cache and downloaded fresh logs")
+		reader3.Close()
 	}
 
 	// Example 4: Custom storage backend (S3)
-	fmt.Println("\n☁️  Example 4: Custom storage backend")
+	fmt.Println("\nExample 4: Custom storage backend")
 	fmt.Println("Storage URL examples:")
 	fmt.Println("- file://~/.bklog (default desktop)")
 	fmt.Println("- file:///tmp/bklog (default container)")
@@ -116,50 +119,30 @@ func main() {
 	fmt.Printf("Storage URL for this example: %s\n", s3URL)
 
 	// Create client with custom storage URL
-	var cacheFile4 string
 	s3Client, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteAPIClient, s3URL)
 	if err != nil {
 		log.Printf("Failed to create S3 client: %v", err)
-		fmt.Println("   → Falling back to local storage for demo")
+		fmt.Println("   -> Falling back to local storage for demo")
 	} else {
 		defer s3Client.Close()
 		start = time.Now()
-		cacheFile4, err = s3Client.DownloadAndCache(
+		reader4, err := s3Client.NewReader(
 			ctx,
 			*org, *pipeline, *build, *job,
 			60*time.Second, // longer TTL
 			false,
 		)
-	}
-
-	if err != nil {
-		log.Printf("S3 cache failed (expected if no AWS creds): %v", err)
-		fmt.Println("   → Falling back to local storage for demo")
-
-		// Fallback to local storage
-		localClient, err := buildkitelogs.NewClientWithAPI(ctx, buildkiteAPIClient, "file://./cache-demo")
 		if err != nil {
-			log.Printf("Failed to create local client: %v", err)
+			log.Printf("S3 cache failed (expected if no AWS creds): %v", err)
+			fmt.Println("   -> Falling back to local storage for demo")
 		} else {
-			defer localClient.Close()
-			cacheFile4, err = localClient.DownloadAndCache(
-				ctx,
-				*org, *pipeline, *build, *job,
-				60*time.Second,
-				false,
-			)
-			if err != nil {
-				log.Printf("Local cache fallback failed: %v", err)
-			}
+			fmt.Printf("Custom storage took %v\n", time.Since(start))
+			reader4.Close()
 		}
 	}
 
-	if err == nil && cacheFile4 != "" {
-		fmt.Printf("✅ Custom storage: %s (took %v)\n", cacheFile4, time.Since(start))
-	}
-
 	// Example 5: Different TTL values
-	fmt.Println("\n⏰ Example 5: Custom TTL values")
+	fmt.Println("\nExample 5: Custom TTL values")
 	ttlExamples := []time.Duration{
 		5 * time.Second,  // Very short TTL
 		2 * time.Minute,  // Medium TTL
@@ -183,7 +166,7 @@ func main() {
 		}
 		defer ttlClient.Close()
 		start = time.Now()
-		cacheFile, err := ttlClient.DownloadAndCache(
+		reader, err := ttlClient.NewReader(
 			ctx,
 			*org, *pipeline, *build, *job,
 			ttl,
@@ -192,34 +175,22 @@ func main() {
 		if err != nil {
 			log.Printf("     Cache failed: %v", err)
 		} else {
-			fmt.Printf("     ✅ Cached: %s (took %v)\n", cacheFile, time.Since(start))
+			fmt.Printf("     Cached in %v\n", time.Since(start))
+			reader.Close()
 		}
 	}
 
 	// Example 6: Demonstrate smart caching behavior
-	fmt.Println("\n🧠 Example 6: Smart caching behavior")
-	fmt.Println("This example would show different behavior based on job status:")
+	fmt.Println("\nSmart caching behavior:")
 	fmt.Println("- Terminal jobs (finished/failed/canceled): cached permanently")
 	fmt.Println("- Non-terminal jobs (running/pending): cached with TTL")
 
-	// This would require actual job data to demonstrate properly
-	fmt.Println("💡 Job status affects caching:")
-	fmt.Println("   - finished/passed/failed/canceled/expired/timed_out/skipped/broken → permanent cache")
-	fmt.Println("   - pending/waiting/running/etc → TTL-based cache (refreshes after TTL)")
-
 	// Cleanup demo cache directories
-	fmt.Println("\n🧹 Cleaning up demo cache directories...")
+	fmt.Println("\nCleaning up demo cache directories...")
 	for i := range ttlExamples {
 		os.RemoveAll(fmt.Sprintf("./cache-ttl-%d", i))
 	}
 	os.RemoveAll("./cache-demo")
 
-	fmt.Println("\n✅ Smart caching example completed!")
-	fmt.Println("💡 Key features demonstrated:")
-	fmt.Println("   - Automatic TTL management (30s default)")
-	fmt.Println("   - Job status-aware caching (terminal vs non-terminal)")
-	fmt.Println("   - Multiple storage backends (file, S3, GCS)")
-	fmt.Println("   - Force refresh capability")
-	fmt.Println("   - Metadata storage with job status and timestamps")
-	fmt.Println("   - Environment-aware storage defaults")
+	fmt.Println("\nSmart caching example completed!")
 }

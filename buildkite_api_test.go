@@ -137,7 +137,9 @@ func TestGetJobStatus_RetriedJob(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(buildResponse)
+		if err := json.NewEncoder(w).Encode(buildResponse); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	}))
 	defer server.Close()
 

@@ -96,6 +96,21 @@ func (c *BuildkiteAPIClient) GetJobStatus(ctx context.Context, org, pipeline, bu
 	}
 
 	if !jobFound {
+		// Check if the job was retried — the original job ID is replaced in the
+		// build's jobs array, but a replacement job will reference it via RetrySource.
+		// See: https://github.com/buildkite/buildkite-mcp-server/issues/228
+		for _, j := range buildInfo.Jobs {
+			if j.RetrySource != nil && j.RetrySource.JobID == jobID {
+				// The original job was retried and replaced by this job.
+				// Retried jobs are always terminal (they finished before being retried).
+				return &JobStatus{
+					ID:         jobID,
+					State:      JobStateFailed,
+					IsTerminal: true,
+				}, nil
+			}
+		}
+
 		return nil, fmt.Errorf("job not found: %s", jobID)
 	}
 

@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -347,6 +348,77 @@ func TestClient_NewReader_LogWithinLimit(t *testing.T) {
 	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("NewReader: %v", err)
+	}
+	defer reader.Close()
+}
+
+// mockRetriedJobAPI simulates the Buildkite API behavior when a job has been retried.
+// The original job ID is replaced in the build's jobs array, but the replacement job
+// references it via RetrySource. The log endpoint still works for both job IDs.
+// See: https://github.com/buildkite/buildkite-mcp-server/issues/228
+type mockRetriedJobAPI struct {
+	originalJobID    string
+	replacementJobID string
+	logContent       string
+	getLogCalls      int
+	getStatusCalls   int
+}
+
+func (m *mockRetriedJobAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
+	m.getLogCalls++
+	// The raw log endpoint works for both original and replacement job IDs
+	return io.NopCloser(strings.NewReader(m.logContent)), nil
+}
+
+func (m *mockRetriedJobAPI) GetJobStatus(ctx context.Context, org, pipeline, build, jobID string) (*JobStatus, error) {
+	m.getStatusCalls++
+	// Simulate the real API: the original job is no longer in the build's jobs array
+	if jobID == m.originalJobID {
+		return nil, fmt.Errorf("job not found: %s", jobID)
+	}
+	// The replacement job is found normally
+	if jobID == m.replacementJobID {
+		return &JobStatus{
+			ID:         m.replacementJobID,
+			State:      JobStateFailed,
+			IsTerminal: true,
+		}, nil
+	}
+	return nil, fmt.Errorf("job not found: %s", jobID)
+}
+
+func TestClient_NewReader_RetriedJob_OriginalJobNotFound(t *testing.T) {
+	// This test verifies the bug from buildkite-mcp-server#228 at the Client level:
+	// When GetJobStatus returns "job not found" for a retried job, NewReader fails.
+	// This is the pre-fix behavior that the GetJobStatus fix resolves.
+	mock := &mockRetriedJobAPI{
+		originalJobID:    "019ce437-f44f-4528-9d74-dfae306fed69",
+		replacementJobID: "019ce438-3423-432e-a4f2-b0bfbffcc980",
+		logContent:       "\x1b_bk;t=1745322209921\x07Original job log output\n",
+	}
+
+	tempDir := t.TempDir()
+	client, err := NewClientWithAPI(t.Context(), mock, "file://"+tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
+
+	// The mock still returns "job not found" (simulating unfixed GetJobStatus),
+	// so NewReader fails for the original job ID.
+	_, err = client.NewReader(t.Context(), "bk-mark-wolfe", "starter-pipeline", "76", mock.originalJobID, time.Minute, false)
+	if err == nil {
+		t.Fatal("expected error for retried job, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "job not found") {
+		t.Errorf("expected 'job not found' error, got: %v", err)
+	}
+
+	// The replacement job ID works fine
+	reader, err := client.NewReader(t.Context(), "bk-mark-wolfe", "starter-pipeline", "76", mock.replacementJobID, time.Minute, false)
+	if err != nil {
+		t.Fatalf("expected replacement job to work, got: %v", err)
 	}
 	defer reader.Close()
 }

@@ -106,6 +106,10 @@ func TestIsContainerizedEnvironment(t *testing.T) {
 // TestWriteWithMetadataCloseError verifies that Close() errors are properly propagated
 // and not silently ignored when using WriteWithMetadata
 func TestWriteWithMetadataCloseError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod-based permission test does not apply when running as root")
+	}
+
 	ctx := context.Background()
 
 	// Create temporary directory for testing

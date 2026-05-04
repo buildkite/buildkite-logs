@@ -1,15 +1,14 @@
+image: "buildkite/hosted-agent-base-images:ubuntu-jammy"
+
 steps:
   - group: ':mag: QA'
     id: quality_checks
     steps:
       - key: lint
         label: ':golangci-lint: lint'
+        command: golangci-lint run --verbose --timeout 3m
         plugins:
-          - docker-compose#v5.10.0:
-              config: .buildkite/docker-compose.yaml
-              run: golangci-lint
-              progress: plain
-              tty: true
+          - mise#v1.1.1: ~
       - key: test
         label: ':go: test'
         artifact_paths:
@@ -19,9 +18,4 @@ steps:
           - go run github.com/nikolaydubina/go-cover-treemap -coverprofile cover.out > cover-tree.svg
           - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"        
         plugins:
-          - docker-compose#v5.10.0:
-              config: .buildkite/docker-compose.yaml
-              run: golang
-              progress: plain
-              tty: true
-              mount-buildkite-agent: true
+          - mise#v1.1.1: ~

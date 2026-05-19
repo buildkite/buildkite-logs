@@ -12,7 +12,7 @@ func TestParquetReader_GetFileInfo(t *testing.T) {
 		t.Skip("test data not found")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	info, err := reader.GetFileInfo()
 	if err != nil {
@@ -42,7 +42,7 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 		t.Skip("test data not found")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	// Get file info first
 	info, err := reader.GetFileInfo()
@@ -52,7 +52,7 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 
 	t.Run("SeekToBeginning", func(t *testing.T) {
 		entryCount := 0
-		for entry, err := range reader.SeekToRow(0) {
+		for entry, err := range reader.SeekToRow(t.Context(), 0) {
 			if err != nil {
 				t.Fatalf("SeekToRow(0) failed: %v", err)
 			}
@@ -82,7 +82,7 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 		midRow := info.RowCount / 2
 		entryCount := 0
 
-		for entry, err := range reader.SeekToRow(midRow) {
+		for entry, err := range reader.SeekToRow(t.Context(), midRow) {
 			if err != nil {
 				t.Fatalf("SeekToRow(%d) failed: %v", midRow, err)
 			}
@@ -106,7 +106,7 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 
 	t.Run("SeekBeyondFile", func(t *testing.T) {
 		entryCount := 0
-		for _, err := range reader.SeekToRow(info.RowCount + 100) {
+		for _, err := range reader.SeekToRow(t.Context(), info.RowCount+100) {
 			if err == nil {
 				entryCount++
 				if entryCount > 0 {
@@ -125,7 +125,7 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 		entryCount := 0
 		targetCount := 3
 
-		for _, err := range reader.SeekToRow(5) {
+		for _, err := range reader.SeekToRow(t.Context(), 5) {
 			if err != nil {
 				t.Fatalf("SeekToRow(5) failed: %v", err)
 			}

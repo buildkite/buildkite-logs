@@ -14,13 +14,13 @@ func BenchmarkParquetReader_ReadEntriesIter(b *testing.B) {
 		b.Skip("test_logs.parquet not found - run parse command first to generate test data")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
 		count := 0
-		for entry, err := range reader.ReadEntriesIter() {
+		for entry, err := range reader.ReadEntriesIter(b.Context()) {
 			if err != nil {
 				b.Fatalf("ReadEntriesIter failed: %v", err)
 			}
@@ -40,13 +40,13 @@ func BenchmarkParquetReader_FilterByGroupIter(b *testing.B) {
 		b.Skip("test_logs.parquet not found - run parse command first to generate test data")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
 		count := 0
-		for entry, err := range reader.FilterByGroupIter("environment") {
+		for entry, err := range reader.FilterByGroupIter(b.Context(), "environment") {
 			if err != nil {
 				b.Fatalf("FilterByGroupIter failed: %v", err)
 			}
@@ -88,7 +88,7 @@ func BenchmarkStreamingGroupAnalysis(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -96,7 +96,7 @@ func BenchmarkStreamingGroupAnalysis(b *testing.B) {
 	for b.Loop() {
 		groupMap := make(map[string]*GroupInfo)
 
-		for entry, err := range reader.ReadEntriesIter() {
+		for entry, err := range reader.ReadEntriesIter(b.Context()) {
 			if err != nil {
 				b.Fatalf("ReadEntriesIter failed: %v", err)
 			}
@@ -133,12 +133,12 @@ func BenchmarkParquetReaderOperations(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	b.Run("ReadEntriesIter", func(b *testing.B) {
 		for b.Loop() {
 			count := 0
-			for entry, err := range reader.ReadEntriesIter() {
+			for entry, err := range reader.ReadEntriesIter(b.Context()) {
 				if err != nil {
 					b.Fatalf("ReadEntriesIter failed: %v", err)
 				}
@@ -151,7 +151,7 @@ func BenchmarkParquetReaderOperations(b *testing.B) {
 	b.Run("FilterByGroupIter", func(b *testing.B) {
 		for b.Loop() {
 			count := 0
-			for entry, err := range reader.FilterByGroupIter("environment") {
+			for entry, err := range reader.FilterByGroupIter(b.Context(), "environment") {
 				if err != nil {
 					b.Fatalf("FilterByGroupIter failed: %v", err)
 				}
@@ -169,14 +169,14 @@ func BenchmarkStreamingMemoryUsage(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	b.Run("StreamingProcessing", func(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
 		for b.Loop() {
-			for entry, err := range reader.ReadEntriesIter() {
+			for entry, err := range reader.ReadEntriesIter(b.Context()) {
 				if err != nil {
 					b.Fatalf("ReadEntriesIter failed: %v", err)
 				}
@@ -195,7 +195,7 @@ func BenchmarkEarlyTermination(b *testing.B) {
 		b.Skip("test_logs.parquet not found")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 	targetCount := 100 // Only process first 100 entries
 
 	b.Run("Iterator_StopEarly", func(b *testing.B) {
@@ -204,7 +204,7 @@ func BenchmarkEarlyTermination(b *testing.B) {
 
 		for b.Loop() {
 			count := 0
-			for entry, err := range reader.ReadEntriesIter() {
+			for entry, err := range reader.ReadEntriesIter(b.Context()) {
 				if err != nil {
 					b.Fatalf("ReadEntriesIter failed: %v", err)
 				}
@@ -224,7 +224,7 @@ func BenchmarkEarlyTermination(b *testing.B) {
 
 		for b.Loop() {
 			count := 0
-			for entry, err := range reader.FilterByGroupIter("test") {
+			for entry, err := range reader.FilterByGroupIter(b.Context(), "test") {
 				if err != nil {
 					b.Fatalf("FilterByGroupIter failed: %v", err)
 				}

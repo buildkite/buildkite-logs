@@ -13,6 +13,8 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
+
 	// Get API token from environment
 	apiToken := os.Getenv("BUILDKITE_API_TOKEN")
 	if apiToken == "" {
@@ -24,8 +26,6 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to create buildkite client:", err)
 	}
-
-	ctx := context.Background()
 
 	// Create high-level Client
 	storageURL := "file://~/.bklog" // Uses default storage location
@@ -87,7 +87,7 @@ func main() {
 
 	// Read first 10 entries
 	count := 0
-	for entry, err := range reader.ReadEntriesIter() {
+	for entry, err := range reader.ReadEntriesIter(ctx) {
 		if err != nil {
 			log.Printf("Error reading entries: %v", err)
 			return
@@ -125,7 +125,7 @@ func main() {
 	}
 
 	fmt.Println("Searching for 'error' in logs:")
-	for result, err := range reader2.SearchEntriesIter(searchOpts) {
+	for result, err := range reader2.SearchEntriesIter(ctx, searchOpts) {
 		if err != nil {
 			log.Printf("Error searching: %v", err)
 			return

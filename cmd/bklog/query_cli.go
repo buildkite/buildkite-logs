@@ -289,14 +289,14 @@ func runQuery(ctx context.Context, config *QueryConfig) error {
 	}
 	defer reader.Close()
 
-	return runStreamingQuery(reader, config)
+	return runStreamingQuery(ctx, reader, config)
 }
 
 // resolveReader creates a ParquetReader from either a local file or the Buildkite API.
 func resolveReader(ctx context.Context, config *QueryConfig) (*buildkitelogs.ParquetReader, error) {
 	// If file path is provided directly, use it (non-owned reader)
 	if config.ParquetFile != "" {
-		return buildkitelogs.NewParquetReader(ctx, config.ParquetFile), nil
+		return buildkitelogs.NewParquetReader(config.ParquetFile), nil
 	}
 
 	// If API parameters are provided, download and cache using high-level client
@@ -326,12 +326,12 @@ func resolveReader(ctx context.Context, config *QueryConfig) (*buildkitelogs.Par
 }
 
 // runStreamingQuery executes streaming queries for memory efficiency
-func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig) error {
+func runStreamingQuery(ctx context.Context, reader *buildkitelogs.ParquetReader, config *QueryConfig) error {
 	start := time.Now()
 
 	switch config.Operation {
 	case "list-groups":
-		return streamListGroups(reader, config, start)
+		return streamListGroups(ctx, reader, config, start)
 
 	case "info":
 		return showFileInfo(reader, config)
@@ -339,30 +339,30 @@ func runStreamingQuery(reader *buildkitelogs.ParquetReader, config *QueryConfig)
 		if config.GroupName == "" {
 			return fmt.Errorf("group pattern is required for by-group operation")
 		}
-		return streamByGroup(reader, config, start)
+		return streamByGroup(ctx, reader, config, start)
 	case "search":
 		if config.SearchPattern == "" {
 			return fmt.Errorf("pattern is required for search operation")
 		}
-		return streamSearch(reader, config, start)
+		return streamSearch(ctx, reader, config, start)
 	case "tail":
-		return tailFile(reader, config, start)
+		return tailFile(ctx, reader, config, start)
 	case "seek":
-		return seekToRow(reader, config, start)
+		return seekToRow(ctx, reader, config, start)
 	case "dump":
-		return streamDump(reader, config, start)
+		return streamDump(ctx, reader, config, start)
 	default:
 		return fmt.Errorf("unknown operation: %s", config.Operation)
 	}
 }
 
 // streamListGroups handles list-groups operation using streaming
-func streamListGroups(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+func streamListGroups(ctx context.Context, reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
 	// Use streaming iterator to build group statistics
 	groupMap := make(map[string]*buildkitelogs.GroupInfo)
 	totalEntries := 0
 
-	for entry, err := range reader.ReadEntriesIter() {
+	for entry, err := range reader.ReadEntriesIter(ctx) {
 		if err != nil {
 			return fmt.Errorf("error reading entries: %w", err)
 		}
@@ -414,11 +414,11 @@ func streamListGroups(reader *buildkitelogs.ParquetReader, config *QueryConfig, 
 
 	// Format output
 	queryTime := float64(time.Since(start).Nanoseconds()) / 1e6
-	return formatStreamingGroupsResult(groups, totalEntries, queryTime, config)
+	return formatStreamingGroupsResult(ctx, groups, totalEntries, queryTime, config)
 }
 
 // streamSearch handles search operation using streaming with regex pattern matching and context lines
-func streamSearch(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+func streamSearch(ctx context.Context, reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
 	// Create search options
 	options := buildkitelogs.SearchOptions{
 		Pattern:       config.SearchPattern,
@@ -434,7 +434,7 @@ func streamSearch(reader *buildkitelogs.ParquetReader, config *QueryConfig, star
 	var results []buildkitelogs.SearchResult
 	matchesFound := 0
 
-	for result, err := range reader.SearchEntriesIter(options) {
+	for result, err := range reader.SearchEntriesIter(ctx, options) {
 		if err != nil {
 			return fmt.Errorf("error during search: %w", err)
 		}
@@ -454,12 +454,12 @@ func streamSearch(reader *buildkitelogs.ParquetReader, config *QueryConfig, star
 }
 
 // streamByGroup handles by-group operation using streaming with optional limiting
-func streamByGroup(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+func streamByGroup(ctx context.Context, reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
 	var entries []buildkitelogs.ParquetLogEntry
 	totalEntries := 0
 	matchedEntries := 0
 
-	for entry, err := range reader.FilterByGroupIter(config.GroupName) {
+	for entry, err := range reader.FilterByGroupIter(ctx, config.GroupName) {
 		if err != nil {
 			return fmt.Errorf("error filtering entries: %w", err)
 		}
@@ -476,7 +476,7 @@ func streamByGroup(reader *buildkitelogs.ParquetReader, config *QueryConfig, sta
 
 	// Count total entries for stats if needed (requires separate iteration)
 	if config.ShowStats {
-		for range reader.ReadEntriesIter() {
+		for range reader.ReadEntriesIter(ctx) {
 			totalEntries++
 		}
 	}
@@ -497,7 +497,7 @@ func writeJSONLines[T any](entries []T, writer io.Writer) error {
 }
 
 // formatStreamingGroupsResult formats groups output from streaming query
-func formatStreamingGroupsResult(groups []buildkitelogs.GroupInfo, totalEntries int, queryTime float64, config *QueryConfig) error {
+func formatStreamingGroupsResult(ctx context.Context, groups []buildkitelogs.GroupInfo, totalEntries int, queryTime float64, config *QueryConfig) error {
 	if config.Format == "json" {
 		return writeJSONLines(groups, io.Writer(os.Stdout))
 	}
@@ -623,7 +623,7 @@ func showFileInfo(reader *buildkitelogs.ParquetReader, config *QueryConfig) erro
 }
 
 // tailFile shows the last N entries from the file
-func tailFile(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+func tailFile(ctx context.Context, reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
 	// Get file info to calculate starting position
 	info, err := reader.GetFileInfo()
 	if err != nil {
@@ -644,7 +644,7 @@ func tailFile(reader *buildkitelogs.ParquetReader, config *QueryConfig, start ti
 	var entries []buildkitelogs.ParquetLogEntry
 	entriesRead := 0
 
-	for entry, err := range reader.SeekToRow(startRow) {
+	for entry, err := range reader.SeekToRow(ctx, startRow) {
 		if err != nil {
 			return fmt.Errorf("error reading entries: %w", err)
 		}
@@ -664,11 +664,11 @@ func tailFile(reader *buildkitelogs.ParquetReader, config *QueryConfig, start ti
 }
 
 // seekToRow starts reading from a specific row
-func seekToRow(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+func seekToRow(ctx context.Context, reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
 	var entries []buildkitelogs.ParquetLogEntry
 	entriesRead := 0
 
-	for entry, err := range reader.SeekToRow(config.SeekToRow) {
+	for entry, err := range reader.SeekToRow(ctx, config.SeekToRow) {
 		if err != nil {
 			return fmt.Errorf("error reading entries: %w", err)
 		}
@@ -738,11 +738,11 @@ func formatSeekResult(entries []buildkitelogs.ParquetLogEntry, startRow, entries
 }
 
 // streamDump handles dump operation using streaming to output all entries
-func streamDump(reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
+func streamDump(ctx context.Context, reader *buildkitelogs.ParquetReader, config *QueryConfig, start time.Time) error {
 	var entries []buildkitelogs.ParquetLogEntry
 	totalEntries := 0
 
-	for entry, err := range reader.ReadEntriesIter() {
+	for entry, err := range reader.ReadEntriesIter(ctx) {
 		if err != nil {
 			return fmt.Errorf("error reading entries: %w", err)
 		}

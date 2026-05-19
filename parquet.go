@@ -18,8 +18,6 @@ func createNewFileWriter(schema *arrow.Schema, file *os.File, pool memory.Alloca
 	writer, err := pqarrow.NewFileWriter(schema, file,
 		parquet.NewWriterProperties(
 			parquet.WithCompression(compress.Codecs.Zstd),
-			parquet.WithCompressionLevel(5),
-			// Removed sorting to preserve insertion order
 		),
 		pqarrow.NewArrowWriterProperties(
 			pqarrow.WithAllocator(pool),
@@ -160,7 +158,7 @@ func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*LogEntry, error], filename str
 	}
 	defer func() { _ = writer.Close() }()
 
-	const batchSize = 10000
+	const batchSize = 1000
 	batch := make([]*LogEntry, 0, batchSize)
 
 	for entry, err := range seq {

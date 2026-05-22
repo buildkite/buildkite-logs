@@ -102,9 +102,9 @@ func TestParquetWriterMultipleBatches(t *testing.T) {
 	}
 
 	// Verify all 15 entries round-trip
-	reader := NewParquetReader(context.Background(), filename)
+	reader := NewParquetReader(filename)
 	var count int
-	for _, err := range reader.ReadEntriesIter() {
+	for _, err := range reader.ReadEntriesIter(t.Context()) {
 		if err != nil {
 			t.Fatalf("ReadEntriesIter error: %v", err)
 		}
@@ -141,9 +141,9 @@ func TestParquetRoundtrip(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 	var results []ParquetLogEntry
-	for entry, err := range reader.ReadEntriesIter() {
+	for entry, err := range reader.ReadEntriesIter(t.Context()) {
 		if err != nil {
 			t.Fatalf("ReadEntriesIter failed: %v", err)
 		}
@@ -213,9 +213,9 @@ func TestParquetRoundtripRowNumbers(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 	var rowNumbers []int64
-	for entry, err := range reader.ReadEntriesIter() {
+	for entry, err := range reader.ReadEntriesIter(t.Context()) {
 		if err != nil {
 			t.Fatalf("ReadEntriesIter failed: %v", err)
 		}

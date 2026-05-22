@@ -1,7 +1,6 @@
 package buildkitelogs
 
 import (
-	"context"
 	"os"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ func TestParquetReader(t *testing.T) {
 	}
 
 	t.Run("NewParquetReader", func(t *testing.T) {
-		reader := NewParquetReader(context.Background(), testFile)
+		reader := NewParquetReader(testFile)
 		if reader == nil {
 			t.Fatal("NewParquetReader returned nil")
 		}
@@ -24,11 +23,11 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("ReadEntriesIter", func(t *testing.T) {
-		reader := NewParquetReader(context.Background(), testFile)
+		reader := NewParquetReader(testFile)
 		entryCount := 0
 		var firstEntry ParquetLogEntry
 
-		for entry, err := range reader.ReadEntriesIter() {
+		for entry, err := range reader.ReadEntriesIter(t.Context()) {
 			if err != nil {
 				t.Fatalf("ReadEntriesIter failed: %v", err)
 			}
@@ -58,10 +57,10 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("FilterByGroupIter", func(t *testing.T) {
-		reader := NewParquetReader(context.Background(), testFile)
+		reader := NewParquetReader(testFile)
 		entryCount := 0
 
-		for entry, err := range reader.FilterByGroupIter("environment") {
+		for entry, err := range reader.FilterByGroupIter(t.Context(), "environment") {
 			if err != nil {
 				t.Fatalf("FilterByGroupIter failed: %v", err)
 			}
@@ -84,11 +83,11 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("StreamingGroupAnalysis", func(t *testing.T) {
-		reader := NewParquetReader(context.Background(), testFile)
+		reader := NewParquetReader(testFile)
 		groupMap := make(map[string]*GroupInfo)
 		totalEntries := 0
 
-		for entry, err := range reader.ReadEntriesIter() {
+		for entry, err := range reader.ReadEntriesIter(t.Context()) {
 			if err != nil {
 				t.Fatalf("ReadEntriesIter failed: %v", err)
 			}
@@ -141,11 +140,11 @@ func TestParquetReader(t *testing.T) {
 	})
 
 	t.Run("EarlyTermination", func(t *testing.T) {
-		reader := NewParquetReader(context.Background(), testFile)
+		reader := NewParquetReader(testFile)
 		targetCount := 5
 		actualCount := 0
 
-		for _, err := range reader.ReadEntriesIter() {
+		for _, err := range reader.ReadEntriesIter(t.Context()) {
 			if err != nil {
 				t.Fatalf("ReadEntriesIter failed: %v", err)
 			}
@@ -286,7 +285,7 @@ func TestReadParquetFileIter(t *testing.T) {
 	entryCount := 0
 	var firstEntry ParquetLogEntry
 
-	for entry, err := range ReadParquetFileIter(context.Background(), testFile) {
+	for entry, err := range ReadParquetFileIter(t.Context(), testFile) {
 		if err != nil {
 			t.Fatalf("ReadParquetFileIter failed: %v", err)
 		}
@@ -317,7 +316,7 @@ func TestReadParquetFileIter(t *testing.T) {
 
 func TestReadParquetFileIterNotFound(t *testing.T) {
 	entryCount := 0
-	for _, err := range ReadParquetFileIter(context.Background(), "nonexistent.parquet") {
+	for _, err := range ReadParquetFileIter(t.Context(), "nonexistent.parquet") {
 		if err != nil {
 			// Expected to get an error on the first iteration
 			return
@@ -336,12 +335,12 @@ func TestStreamingPerformance(t *testing.T) {
 		t.Skip("test data not found")
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	// Test that we can process entries without loading everything into memory
 	t.Run("MemoryEfficient", func(t *testing.T) {
 		entryCount := 0
-		for _, err := range reader.ReadEntriesIter() {
+		for _, err := range reader.ReadEntriesIter(t.Context()) {
 			if err != nil {
 				t.Fatalf("ReadEntriesIter failed: %v", err)
 			}
@@ -361,7 +360,7 @@ func TestStreamingPerformance(t *testing.T) {
 		targetCount := 10
 		actualCount := 0
 
-		for _, err := range reader.ReadEntriesIter() {
+		for _, err := range reader.ReadEntriesIter(t.Context()) {
 			if err != nil {
 				t.Fatalf("ReadEntriesIter failed: %v", err)
 			}
@@ -441,7 +440,7 @@ func TestReverseSearch(t *testing.T) {
 		t.Fatalf("Failed to create test parquet file: %v", err)
 	}
 
-	reader := NewParquetReader(context.Background(), testFile)
+	reader := NewParquetReader(testFile)
 
 	t.Run("ForwardSearch", func(t *testing.T) {
 		options := SearchOptions{
@@ -450,7 +449,7 @@ func TestReverseSearch(t *testing.T) {
 		}
 
 		results := []SearchResult{}
-		for result, err := range reader.SearchEntriesIter(options) {
+		for result, err := range reader.SearchEntriesIter(t.Context(), options) {
 			if err != nil {
 				t.Fatalf("Search failed: %v", err)
 			}
@@ -480,7 +479,7 @@ func TestReverseSearch(t *testing.T) {
 		}
 
 		results := []SearchResult{}
-		for result, err := range reader.SearchEntriesIter(options) {
+		for result, err := range reader.SearchEntriesIter(t.Context(), options) {
 			if err != nil {
 				t.Fatalf("Reverse search failed: %v", err)
 			}
@@ -511,7 +510,7 @@ func TestReverseSearch(t *testing.T) {
 		}
 
 		results := []SearchResult{}
-		for result, err := range reader.SearchEntriesIter(options) {
+		for result, err := range reader.SearchEntriesIter(t.Context(), options) {
 			if err != nil {
 				t.Fatalf("Reverse search with seek failed: %v", err)
 			}
@@ -547,7 +546,7 @@ func TestReverseSearch(t *testing.T) {
 		}
 
 		results := []SearchResult{}
-		for result, err := range reader.SearchEntriesIter(options) {
+		for result, err := range reader.SearchEntriesIter(t.Context(), options) {
 			if err != nil {
 				t.Fatalf("Reverse search with context failed: %v", err)
 			}

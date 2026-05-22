@@ -262,7 +262,7 @@ func TestClient_NewReader_ReadEntries(t *testing.T) {
 
 	// Verify we can read entries from the reader
 	count := 0
-	for _, err := range reader.ReadEntriesIter() {
+	for _, err := range reader.ReadEntriesIter(ctx) {
 		if err != nil {
 			t.Fatalf("ReadEntriesIter: %v", err)
 		}

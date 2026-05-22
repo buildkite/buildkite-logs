@@ -146,25 +146,22 @@ type ParquetFileInfo struct {
 
 // ParquetReader provides functionality to read and query Parquet log files
 type ParquetReader struct {
-	ctx      context.Context
 	filename string
 	owned    bool // if true, Close() removes the file (it's a temp file we created)
 }
 
 // NewParquetReader creates a new ParquetReader for the specified file.
 // The caller retains ownership of the file; Close() is a no-op.
-func NewParquetReader(ctx context.Context, filename string) *ParquetReader {
+func NewParquetReader(filename string) *ParquetReader {
 	return &ParquetReader{
-		ctx:      ctx,
 		filename: filename,
 	}
 }
 
 // newParquetReaderOwned creates a ParquetReader that owns the underlying file.
 // Close() will remove the file.
-func newParquetReaderOwned(ctx context.Context, filename string) *ParquetReader {
+func newParquetReaderOwned(filename string) *ParquetReader {
 	return &ParquetReader{
-		ctx:      ctx,
 		filename: filename,
 		owned:    true,
 	}
@@ -180,18 +177,18 @@ func (pr *ParquetReader) Close() error {
 }
 
 // ReadEntriesIter returns an iterator over log entries from the Parquet file
-func (pr *ParquetReader) ReadEntriesIter() iter.Seq2[ParquetLogEntry, error] {
-	return readParquetFileIter(pr.ctx, pr.filename)
+func (pr *ParquetReader) ReadEntriesIter(ctx context.Context) iter.Seq2[ParquetLogEntry, error] {
+	return readParquetFileIter(ctx, pr.filename)
 }
 
 // FilterByGroupIter returns an iterator over entries that belong to groups matching the specified name pattern
-func (pr *ParquetReader) FilterByGroupIter(groupPattern string) iter.Seq2[ParquetLogEntry, error] {
-	return FilterByGroupIter(pr.ReadEntriesIter(), groupPattern)
+func (pr *ParquetReader) FilterByGroupIter(ctx context.Context, groupPattern string) iter.Seq2[ParquetLogEntry, error] {
+	return FilterByGroupIter(pr.ReadEntriesIter(ctx), groupPattern)
 }
 
 // SeekToRow returns an iterator starting from the specified row number (0-based)
-func (pr *ParquetReader) SeekToRow(startRow int64) iter.Seq2[ParquetLogEntry, error] {
-	return readParquetFileFromRowIter(pr.ctx, pr.filename, startRow)
+func (pr *ParquetReader) SeekToRow(ctx context.Context, startRow int64) iter.Seq2[ParquetLogEntry, error] {
+	return readParquetFileFromRowIter(ctx, pr.filename, startRow)
 }
 
 // GetFileInfo returns metadata about the Parquet file
@@ -200,13 +197,13 @@ func (pr *ParquetReader) GetFileInfo() (*ParquetFileInfo, error) {
 }
 
 // SearchEntriesIter returns an iterator over search results with context
-func (pr *ParquetReader) SearchEntriesIter(options SearchOptions) iter.Seq2[SearchResult, error] {
-	return searchParquetFileIter(pr.ctx, pr.filename, options)
+func (pr *ParquetReader) SearchEntriesIter(ctx context.Context, options SearchOptions) iter.Seq2[SearchResult, error] {
+	return searchParquetFileIter(ctx, pr.filename, options)
 }
 
 // ReadParquetFileIter is a convenience function to get an iterator over entries from a Parquet file
 func ReadParquetFileIter(ctx context.Context, filename string) iter.Seq2[ParquetLogEntry, error] {
-	return readParquetFileIter(ctx, filename)
+	return readParquetFileStreamingIter(ctx, filename, 5000)
 }
 
 // readParquetFileIter reads a Parquet file and returns an iterator over log entries using streaming

@@ -174,7 +174,7 @@ func (c *Client) NewReader(ctx context.Context, org, pipeline, build, job string
 		return nil, err
 	}
 
-	return newParquetReaderOwned(ctx, filePath), nil
+	return newParquetReaderOwned(filePath), nil
 }
 
 // downloadAndCache downloads and caches job logs as Parquet format, returning the local file path.

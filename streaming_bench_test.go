@@ -1,7 +1,6 @@
 package buildkitelogs
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -25,12 +24,12 @@ func TestRealWorldStreamingPerformance(t *testing.T) {
 				t.Skipf("Test file %s not found", tf.path)
 			}
 
-			reader := NewParquetReader(context.Background(), tf.path)
+			reader := NewParquetReader(tf.path)
 
 			// Test streaming iterator performance
 			start := time.Now()
 			iterCount := 0
-			for entry, err := range reader.ReadEntriesIter() {
+			for entry, err := range reader.ReadEntriesIter(t.Context()) {
 				if err != nil {
 					t.Fatalf("ReadEntriesIter failed: %v", err)
 				}
@@ -42,7 +41,7 @@ func TestRealWorldStreamingPerformance(t *testing.T) {
 			// Test early termination performance
 			start = time.Now()
 			earlyCount := 0
-			for entry, err := range reader.ReadEntriesIter() {
+			for entry, err := range reader.ReadEntriesIter(t.Context()) {
 				if err != nil {
 					t.Fatalf("ReadEntriesIter failed: %v", err)
 				}
@@ -79,7 +78,7 @@ func BenchmarkStreamingFiles(b *testing.B) {
 			b.Skipf("Test file %s not found", tf.path)
 		}
 
-		reader := NewParquetReader(context.Background(), tf.path)
+		reader := NewParquetReader(tf.path)
 
 		b.Run(fmt.Sprintf("%s_StreamingFull", tf.name), func(b *testing.B) {
 			b.ResetTimer()
@@ -87,7 +86,7 @@ func BenchmarkStreamingFiles(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				count := 0
-				for entry, err := range reader.ReadEntriesIter() {
+				for entry, err := range reader.ReadEntriesIter(b.Context()) {
 					if err != nil {
 						b.Fatalf("ReadEntriesIter failed: %v", err)
 					}
@@ -103,7 +102,7 @@ func BenchmarkStreamingFiles(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				groupMap := make(map[string]*GroupInfo)
-				for entry, err := range reader.ReadEntriesIter() {
+				for entry, err := range reader.ReadEntriesIter(b.Context()) {
 					if err != nil {
 						b.Fatalf("ReadEntriesIter failed: %v", err)
 					}
@@ -136,7 +135,7 @@ func BenchmarkStreamingFiles(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				count := 0
-				for entry, err := range reader.ReadEntriesIter() {
+				for entry, err := range reader.ReadEntriesIter(b.Context()) {
 					if err != nil {
 						b.Fatalf("ReadEntriesIter failed: %v", err)
 					}
@@ -156,7 +155,7 @@ func BenchmarkStreamingFiles(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				count := 0
-				for entry, err := range reader.FilterByGroupIter("test") {
+				for entry, err := range reader.FilterByGroupIter(b.Context(), "test") {
 					if err != nil {
 						b.Fatalf("FilterByGroupIter failed: %v", err)
 					}

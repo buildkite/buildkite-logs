@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 )
 
 func TestValidateAPIParams(t *testing.T) {

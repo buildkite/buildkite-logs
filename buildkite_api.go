@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 )
 
 // JobStatusProvider defines the interface for getting job status

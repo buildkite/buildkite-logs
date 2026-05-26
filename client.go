@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 )
 
 // ErrLogTooLarge is returned when a job log exceeds the configured maximum size.

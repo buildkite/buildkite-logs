@@ -60,7 +60,7 @@ import (
     "fmt"
     "time"
     
-    "github.com/buildkite/go-buildkite/v4"
+    "github.com/buildkite/go-buildkite/v5"
     buildkitelogs "github.com/buildkite/buildkite-logs"
 )
 

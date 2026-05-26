@@ -9,7 +9,7 @@ import (
 	"time"
 
 	buildkitelogs "github.com/buildkite/buildkite-logs"
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 )
 
 func main() {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 )
 
 // mockBuildkiteAPI implements BuildkiteAPI for testing with call tracking

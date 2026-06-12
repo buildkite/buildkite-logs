@@ -169,7 +169,34 @@ func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string, 
 //   - ttl: Time-to-live for cache (use 0 for default 30s)
 //   - forceRefresh: If true, forces re-download even if cache exists
 func (c *Client) NewReader(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*ParquetReader, error) {
-	filePath, err := c.downloadAndCache(ctx, org, pipeline, build, job, ttl, forceRefresh)
+	filePath, err := c.downloadAndCache(ctx, c.api, org, pipeline, build, job, ttl, forceRefresh)
+	if err != nil {
+		return nil, err
+	}
+
+	return newParquetReaderOwned(filePath), nil
+}
+
+// NewReaderByJobID downloads and caches job logs using only an organization slug and job UUID.
+// Pipeline and build identifiers are resolved from the job's build_url so cache keys remain
+// compatible with pipeline-scoped readers.
+func (c *Client) NewReaderByJobID(ctx context.Context, org, job string, ttl time.Duration, forceRefresh bool) (*ParquetReader, error) {
+	scoped, ok := c.api.(OrgScopedJobAPI)
+	if !ok {
+		return nil, fmt.Errorf("API client does not support organization-scoped job access")
+	}
+
+	location, err := ResolveJobLocation(ctx, scoped, org, job)
+	if err != nil {
+		return nil, err
+	}
+
+	adapter := &orgJobReaderAPI{
+		base:     scoped,
+		location: location,
+	}
+
+	filePath, err := c.downloadAndCache(ctx, adapter, location.Org, location.Pipeline, location.Build, location.Job, ttl, forceRefresh)
 	if err != nil {
 		return nil, err
 	}
@@ -179,12 +206,12 @@ func (c *Client) NewReader(ctx context.Context, org, pipeline, build, job string
 
 // downloadAndCache downloads and caches job logs as Parquet format, returning the local file path.
 // Callers are responsible for removing the returned temp file.
-func (c *Client) downloadAndCache(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (string, error) {
+func (c *Client) downloadAndCache(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (string, error) {
 	if err := ValidateAPIParams(org, pipeline, build, job); err != nil {
 		return "", err
 	}
 
-	return c.downloadAndCacheWithBlobStorage(ctx, org, pipeline, build, job, ttl, forceRefresh)
+	return c.downloadAndCacheWithBlobStorage(ctx, api, org, pipeline, build, job, ttl, forceRefresh)
 }
 
 // Hooks returns the hooks instance for registering callback functions
@@ -193,7 +220,7 @@ func (c *Client) Hooks() *Hooks {
 }
 
 // downloadAndCacheWithBlobStorage downloads logs using the client's blob storage backend
-func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (string, error) {
+func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (string, error) {
 	if ttl == 0 {
 		ttl = 30 * time.Second // Default TTL
 	}
@@ -226,7 +253,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 
 	// Get job status to determine caching strategy
 	jobStatusStart := time.Now()
-	jobStatus, err := c.api.GetJobStatus(ctx, org, pipeline, build, job)
+	jobStatus, err := api.GetJobStatus(ctx, org, pipeline, build, job)
 	if err != nil {
 		return "", fmt.Errorf("failed to get job status: %w", err)
 	}
@@ -266,7 +293,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, org, pipel
 
 	// Download fresh logs from API
 	logDownloadStart := time.Now()
-	logReader, err := c.api.GetJobLog(ctx, org, pipeline, build, job)
+	logReader, err := api.GetJobLog(ctx, org, pipeline, build, job)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch logs from API: %w", err)
 	}

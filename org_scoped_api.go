@@ -13,10 +13,12 @@ import (
 
 // OrgScopedJobAPI provides job access using only an organization slug and job UUID.
 // This matches the organization-scoped REST endpoints documented at
-// https://buildkite.com/docs/apis/rest-api/jobs
+// https://buildkite.com/docs/apis/rest-api/jobs. Implementations must also resolve
+// pipeline/build identifiers so org-scoped readers can use compatible cache keys.
 type OrgScopedJobAPI interface {
 	GetJobByOrg(ctx context.Context, org, jobID string) (buildkite.Job, error)
 	GetJobLogByOrg(ctx context.Context, org, jobID string) (io.ReadCloser, error)
+	GetJobLocationByOrg(ctx context.Context, org, jobID string) (JobLocation, error)
 }
 
 // JobLocation holds the identifiers needed for cache keys and pipeline-scoped API calls.
@@ -83,30 +85,19 @@ func (c *BuildkiteAPIClient) GetJobLogByOrg(ctx context.Context, org, jobID stri
 	return io.NopCloser(strings.NewReader(jobLog.Content)), nil
 }
 
-// ResolveJobLocation fetches a job by organization and UUID, then resolves pipeline
+// GetJobLocationByOrg fetches a job by organization and UUID, then resolves pipeline
 // and build identifiers from the job's build_url for cache key compatibility.
-func ResolveJobLocation(ctx context.Context, api OrgScopedJobAPI, org, jobID string) (JobLocation, error) {
+func (c *BuildkiteAPIClient) GetJobLocationByOrg(ctx context.Context, org, jobID string) (JobLocation, error) {
 	if err := ValidateOrgJobParams(org, jobID); err != nil {
 		return JobLocation{}, err
 	}
 
-	var buildURL string
-	if client, ok := api.(*BuildkiteAPIClient); ok {
-		jobResp, err := client.getJobByOrgResponse(ctx, org, jobID)
-		if err != nil {
-			return JobLocation{}, err
-		}
-		buildURL = jobResp.BuildURL
-	} else {
-		job, err := api.GetJobByOrg(ctx, org, jobID)
-		if err != nil {
-			return JobLocation{}, err
-		}
-		_ = job
-		return JobLocation{}, fmt.Errorf("ResolveJobLocation requires *BuildkiteAPIClient for build_url resolution")
+	jobResp, err := c.getJobByOrgResponse(ctx, org, jobID)
+	if err != nil {
+		return JobLocation{}, err
 	}
 
-	pipeline, build, err := parseBuildURL(buildURL)
+	pipeline, build, err := parseBuildURL(jobResp.BuildURL)
 	if err != nil {
 		return JobLocation{}, fmt.Errorf("failed to resolve pipeline and build for job %s: %w", jobID, err)
 	}
@@ -117,6 +108,14 @@ func ResolveJobLocation(ctx context.Context, api OrgScopedJobAPI, org, jobID str
 		Build:    build,
 		Job:      jobID,
 	}, nil
+}
+
+// ResolveJobLocation resolves the cache identifiers for an organization-scoped job.
+func ResolveJobLocation(ctx context.Context, api OrgScopedJobAPI, org, jobID string) (JobLocation, error) {
+	if err := ValidateOrgJobParams(org, jobID); err != nil {
+		return JobLocation{}, err
+	}
+	return api.GetJobLocationByOrg(ctx, org, jobID)
 }
 
 // parseBuildURL extracts pipeline slug and build number/UUID from a Buildkite build_url.

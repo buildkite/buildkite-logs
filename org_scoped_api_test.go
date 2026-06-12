@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -188,6 +189,66 @@ func TestOrgScopedJobAPI(t *testing.T) {
 			t.Error("expected non-zero row count")
 		}
 	})
+}
+
+type customOrgScopedAPI struct {
+	location JobLocation
+	job      buildkite.Job
+	log      string
+}
+
+func (a *customOrgScopedAPI) GetJobByOrg(ctx context.Context, org, jobID string) (buildkite.Job, error) {
+	return a.job, nil
+}
+
+func (a *customOrgScopedAPI) GetJobLogByOrg(ctx context.Context, org, jobID string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(a.log)), nil
+}
+
+func (a *customOrgScopedAPI) GetJobLocationByOrg(ctx context.Context, org, jobID string) (JobLocation, error) {
+	return a.location, nil
+}
+
+func (a *customOrgScopedAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(a.log)), nil
+}
+
+func (a *customOrgScopedAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error) {
+	return jobStatusFromJob(a.job), nil
+}
+
+func TestNewReaderByJobIDSupportsCustomOrgScopedAPI(t *testing.T) {
+	const (
+		org        = "buildkite"
+		jobID      = "0190046e-e199-453b-a302-a21a4d649d31"
+		logContent = "\x1b_bk;t=1745322209921\x07custom api log line\n"
+	)
+
+	api := &customOrgScopedAPI{
+		location: JobLocation{Org: org, Pipeline: "starter-pipeline", Build: "76", Job: jobID},
+		job:      buildkite.Job{ID: jobID, State: "passed"},
+		log:      logContent,
+	}
+
+	client, err := NewClientWithAPI(context.Background(), api, "file://"+t.TempDir())
+	if err != nil {
+		t.Fatalf("NewClientWithAPI: %v", err)
+	}
+	defer client.Close()
+
+	reader, err := client.NewReaderByJobID(context.Background(), org, jobID, 0, false)
+	if err != nil {
+		t.Fatalf("NewReaderByJobID: %v", err)
+	}
+	defer reader.Close()
+
+	info, err := reader.GetFileInfo()
+	if err != nil {
+		t.Fatalf("GetFileInfo: %v", err)
+	}
+	if info.RowCount == 0 {
+		t.Error("expected non-zero row count")
+	}
 }
 
 func TestGetJobLogByOrgUsesOrganizationEndpoint(t *testing.T) {

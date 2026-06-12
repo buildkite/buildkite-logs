@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"time"
@@ -13,29 +12,31 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	ctx := context.Background()
 
-	// Get API token from environment
 	apiToken := os.Getenv("BUILDKITE_API_TOKEN")
 	if apiToken == "" {
-		log.Fatal("BUILDKITE_API_TOKEN environment variable is required")
+		return fmt.Errorf("BUILDKITE_API_TOKEN environment variable is required")
 	}
 
-	// Create buildkite client
 	client, err := buildkite.NewOpts(buildkite.WithTokenAuth(apiToken))
 	if err != nil {
-		log.Fatal("Failed to create buildkite client:", err)
+		return fmt.Errorf("failed to create buildkite client: %w", err)
 	}
 
-	// Create high-level Client
-	storageURL := "file://~/.bklog" // Uses default storage location
+	storageURL := "file://~/.bklog"
 	buildkiteLogsClient, err := buildkitelogs.NewClient(ctx, client, storageURL)
 	if err != nil {
-		log.Fatal("Failed to create buildkite logs client:", err)
+		return fmt.Errorf("failed to create buildkite logs client: %w", err)
 	}
 	defer buildkiteLogsClient.Close()
 
-	// Setup hooks for observability
 	buildkiteLogsClient.Hooks().AddAfterCacheCheck(func(ctx context.Context, result *buildkitelogs.CacheCheckResult) {
 		log.Printf("Cache check for %s: exists=%t, took %v", result.BlobKey, result.Exists, result.Duration)
 	})
@@ -49,48 +50,29 @@ func main() {
 		log.Printf("Downloaded %d bytes in %v", result.LogSize, result.Duration)
 	})
 
-	buildkiteLogsClient.Hooks().AddAfterLogParsing(func(ctx context.Context, result *buildkitelogs.LogParsingResult) {
-		log.Printf("Parsed logs to %d bytes Parquet in %v", result.ParquetSize, result.Duration)
-	})
+	org := envOrDefault("BUILDKITE_ORGANIZATION_SLUG", "myorg")
+	pipeline := envOrDefault("BUILDKITE_PIPELINE_SLUG", "mypipeline")
+	build := envOrDefault("BUILDKITE_BUILD_NUMBER", "123")
+	job := envOrDefault("BUILDKITE_JOB_ID", "abc-123-def")
 
-	buildkiteLogsClient.Hooks().AddAfterBlobStorage(func(ctx context.Context, result *buildkitelogs.BlobStorageResult) {
-		log.Printf("Stored %d bytes to blob storage (terminal: %t) in %v",
-			result.DataSize, result.IsTerminal, result.Duration)
-	})
-
-	buildkiteLogsClient.Hooks().AddAfterLocalCache(func(ctx context.Context, result *buildkitelogs.LocalCacheResult) {
-		log.Printf("Created local cache file %s (%d bytes) in %v",
-			result.LocalPath, result.FileSize, result.Duration)
-	})
-
-	org := "myorg"
-	pipeline := "mypipeline"
-	build := "123"
-	job := "abc-123-def"
-
-	// Example 1: Get a reader and query the logs
-	fmt.Println("Creating reader and querying logs...")
-	reader, err := buildkiteLogsClient.NewReader(ctx, org, pipeline, build, job, time.Minute*5, false)
+	// Example 1: pipeline-scoped reader (org + pipeline + build + job)
+	fmt.Println("Example 1: NewReader with pipeline and build context...")
+	reader, err := buildkiteLogsClient.NewReader(ctx, org, pipeline, build, job, 5*time.Minute, false)
 	if err != nil {
-		log.Printf("Failed to create reader: %v", err)
-		return
+		return fmt.Errorf("failed to create reader: %w", err)
 	}
 	defer reader.Close()
 
-	// Get file info
 	info, err := reader.GetFileInfo()
 	if err != nil {
-		log.Printf("Failed to get file info: %v", err)
-		return
+		return fmt.Errorf("failed to get file info: %w", err)
 	}
 	fmt.Printf("Log file contains %d rows\n", info.RowCount)
 
-	// Read first 10 entries
 	count := 0
 	for entry, err := range reader.ReadEntriesIter(ctx) {
 		if err != nil {
-			log.Printf("Error reading entries: %v", err)
-			return
+			return fmt.Errorf("error reading entries: %w", err)
 		}
 
 		fmt.Printf("Entry %d: %s\n", count+1, entry.Content)
@@ -100,24 +82,22 @@ func main() {
 		}
 	}
 
-	// Example 2: Using with custom API implementation
-	fmt.Println("\nExample with custom API:")
-	customAPI := &CustomBuildkiteAPI{} // Your custom implementation
-	customClient, err := buildkitelogs.NewClientWithAPI(ctx, customAPI, storageURL)
+	// Example 2: org-scoped reader (org + job UUID only)
+	// Uses GET /v2/organizations/{org}/jobs/{jobID} and .../log under the hood.
+	// Pipeline and build are resolved from build_url so cache keys match Example 1.
+	fmt.Println("\nExample 2: NewReaderByJobID with org and job UUID only...")
+	location, err := buildkitelogs.ResolveJobLocation(ctx, buildkitelogs.NewBuildkiteAPIExistingClient(client), org, job)
 	if err != nil {
-		log.Printf("Failed to create custom client: %v", err)
-		return
+		return fmt.Errorf("failed to resolve job location: %w", err)
 	}
-	defer customClient.Close()
+	fmt.Printf("Resolved pipeline=%s build=%s for job %s\n", location.Pipeline, location.Build, location.Job)
 
-	reader2, err := customClient.NewReader(ctx, org, pipeline, build, job, time.Minute*5, false)
+	readerByJob, err := buildkiteLogsClient.NewReaderByJobID(ctx, org, job, 5*time.Minute, false)
 	if err != nil {
-		log.Printf("Failed to create reader with custom API: %v", err)
-		return
+		return fmt.Errorf("failed to create reader by job ID: %w", err)
 	}
-	defer reader2.Close()
+	defer readerByJob.Close()
 
-	// Search for specific patterns
 	searchOpts := buildkitelogs.SearchOptions{
 		Pattern:       "error",
 		Context:       2,
@@ -125,27 +105,25 @@ func main() {
 	}
 
 	fmt.Println("Searching for 'error' in logs:")
-	for result, err := range reader2.SearchEntriesIter(ctx, searchOpts) {
+	found := false
+	for result, err := range readerByJob.SearchEntriesIter(ctx, searchOpts) {
 		if err != nil {
-			log.Printf("Error searching: %v", err)
-			return
+			return fmt.Errorf("error searching: %w", err)
 		}
 		fmt.Printf("Found error at row %d: %s\n", result.Match.RowNumber, result.Match.Content)
-		break // Just show first result
+		found = true
+		break
 	}
+	if !found {
+		fmt.Println("No matches found")
+	}
+
+	return nil
 }
 
-// CustomBuildkiteAPI is an example custom implementation
-type CustomBuildkiteAPI struct {
-	// Your custom implementation fields
-}
-
-func (c *CustomBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
-	// Your custom log fetching logic
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (c *CustomBuildkiteAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*buildkitelogs.JobStatus, error) {
-	// Your custom job status logic
-	return nil, fmt.Errorf("not implemented")
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }

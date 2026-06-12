@@ -19,6 +19,14 @@ The `Client` provides a simplified interface for common operations:
 export BUILDKITE_API_TOKEN="your-buildkite-api-token"
 ```
 
+Optional overrides for the example job (defaults are placeholders):
+```bash
+export BUILDKITE_ORGANIZATION_SLUG="myorg"
+export BUILDKITE_PIPELINE_SLUG="mypipeline"
+export BUILDKITE_BUILD_NUMBER="123"
+export BUILDKITE_JOB_ID="your-job-uuid"
+```
+
 ## Running the Example
 
 ```bash
@@ -28,9 +36,9 @@ go run main.go
 
 ## What the Example Does
 
-The example demonstrates three main use cases plus hooks for observability:
+The example demonstrates two main use cases plus hooks for observability:
 
-### 1. Basic Usage with Official Client
+### 1. Pipeline-Scoped Reader (`NewReader`)
 
 Creates a `Client` using the official `*buildkite.Client` and shows how to:
 - Download and cache logs to a local file
@@ -38,21 +46,18 @@ Creates a `Client` using the official `*buildkite.Client` and shows how to:
 - Read basic file information (row count, file size, etc.)
 - Iterate through log entries
 
-### 2. Advanced Querying
+Requires organization, pipeline, build, and job identifiers.
 
-Shows how to use the `ParquetReader` for advanced operations:
-- Search for specific patterns in logs with context
-- Filter entries by group/section
-- Get file metadata and statistics
+### 2. Job UUID-Only Reader (`NewReaderByJobID`)
 
-### 3. Custom API Implementation
+Shows how to fetch and query logs when you only have an organization slug and job UUID:
+- Uses organization-scoped REST endpoints (`/v2/organizations/{org}/jobs/{jobID}`)
+- Resolves pipeline and build from the job's `build_url` for cache key compatibility
+- Searches log entries with regex patterns
 
-Demonstrates how to use a custom `BuildkiteAPI` implementation instead of the official client, which is useful for:
-- Testing with mock data
-- Custom authentication or rate limiting
-- Integrating with other log sources
+This matches how the Buildkite CLI accesses job logs by UUID alone.
 
-### 4. Observability Hooks
+### 3. Observability Hooks
 
 Shows how to set up hooks for detailed observability of the download and caching process:
 - Cache check timing and results
@@ -95,9 +100,14 @@ Creates a client using a custom API implementation.
 
 Downloads and caches logs, returns the local file path.
 
-### `NewReader(ctx, org, pipeline, build, job, ttl, forceRefresh)`
+### `NewReaderByJobID(ctx, org, job, ttl, forceRefresh)`
 
-Downloads/caches logs and returns a `ParquetReader` for querying.
+Downloads/caches logs using only org + job UUID and returns a `ParquetReader`.
+Pipeline and build are resolved automatically from the job's `build_url`.
+
+### `ResolveJobLocation(ctx, api, org, job)`
+
+Resolves pipeline and build identifiers for a job UUID without downloading logs.
 
 ## Error Handling
 

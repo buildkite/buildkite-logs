@@ -84,6 +84,9 @@ func (c *BuildkiteAPIClient) GetJobLog(ctx context.Context, org, pipeline, build
 	reader, writer := io.Pipe()
 	go func() {
 		_, err := c.client.Do(req, writer)
+		if err != nil {
+			err = &logDownloadError{err: err}
+		}
 		_ = writer.CloseWithError(err)
 	}()
 

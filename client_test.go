@@ -20,12 +20,19 @@ type mockBuildkiteAPI struct {
 	getLogCalls    int
 	getStatusCalls int
 	logDelay       time.Duration
+	logStarted     chan struct{}
 	statusErr      error
 	logErr         error
 	mu             sync.Mutex
 }
 
 func (m *mockBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
+	if m.logStarted != nil {
+		select {
+		case m.logStarted <- struct{}{}:
+		default:
+		}
+	}
 	if m.logDelay > 0 {
 		select {
 		case <-ctx.Done():
@@ -311,6 +318,44 @@ func TestClient_ConcurrentForceAndTTLRefresh_Coalesce(t *testing.T) {
 	}
 }
 
+func TestClient_RefreshContinuesWhenSingleflightLeaderCancels(t *testing.T) {
+	mock := newTerminalMock()
+	mock.logDelay = 50 * time.Millisecond
+	mock.logStarted = make(chan struct{}, 1)
+	client := newTestClient(t, mock)
+
+	leaderCtx, cancelLeader := context.WithCancel(t.Context())
+	leaderErr := make(chan error, 1)
+	go func() {
+		reader, err := client.NewReader(leaderCtx, "org", "pipeline", "123", "job-1", time.Minute, false)
+		if reader != nil {
+			_ = reader.Close()
+		}
+		leaderErr <- err
+	}()
+
+	<-mock.logStarted
+	cancelLeader()
+
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("follower NewReader: %v", err)
+	}
+	defer reader.Close()
+
+	if err := <-leaderErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("leader error = %v, want context.Canceled", err)
+	}
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 1 {
+		t.Fatalf("GetJobLog calls = %d, want 1", logCalls)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	}
+}
+
 func TestClient_NewReader_JobStatusErrorHook(t *testing.T) {
 	statusErr := errors.New("status unavailable")
 	mock := &mockBuildkiteAPI{
@@ -341,6 +386,73 @@ func TestClient_NewReader_JobStatusErrorHook(t *testing.T) {
 	if hookResult.Stage != StageJobStatus {
 		t.Fatalf("hook stage = %q, want %q", hookResult.Stage, StageJobStatus)
 	}
+}
+
+func TestClient_NewReader_LogDownloadStreamErrorHook(t *testing.T) {
+	downloadErr := errors.New("buildkite returned 500")
+	mock := &mockBuildkiteAPI{
+		logContent: "\x1b_bk;t=1745322209921\x07Test log entry\n",
+		jobStatus:  &JobStatus{ID: "test-job", State: JobStatePassed, IsTerminal: true},
+	}
+	client := newTestClient(t, mock)
+	mock.logErr = nil
+
+	var downloadResult *LogDownloadResult
+	var parsingCalled bool
+	client.Hooks().AddAfterLogDownload(func(ctx context.Context, r *LogDownloadResult) {
+		downloadResult = r
+	})
+	client.Hooks().AddAfterLogParsing(func(ctx context.Context, r *LogParsingResult) {
+		parsingCalled = true
+	})
+
+	mockWithStreamErr := &streamErrorBuildkiteAPI{
+		status: mock.jobStatus,
+		err:    &logDownloadError{err: downloadErr},
+	}
+	client.api = mockWithStreamErr
+
+	_, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err == nil {
+		t.Fatal("expected NewReader to fail")
+	}
+	if downloadResult == nil {
+		t.Fatal("expected log download hook to fire")
+	}
+	if downloadResult.Success {
+		t.Fatal("expected log download hook to report failure")
+	}
+	if !errors.Is(downloadResult.Err, downloadErr) {
+		t.Fatalf("download hook error = %v, want %v", downloadResult.Err, downloadErr)
+	}
+	if parsingCalled {
+		t.Fatal("log parsing hook should not fire for stream download errors")
+	}
+}
+
+type streamErrorBuildkiteAPI struct {
+	status *JobStatus
+	err    error
+}
+
+func (a *streamErrorBuildkiteAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error) {
+	return a.status, nil
+}
+
+func (a *streamErrorBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
+	return &errorReadCloser{err: a.err}, nil
+}
+
+type errorReadCloser struct {
+	err error
+}
+
+func (r *errorReadCloser) Read(p []byte) (int, error) {
+	return 0, r.err
+}
+
+func (r *errorReadCloser) Close() error {
+	return nil
 }
 
 func runConcurrentReaders(t *testing.T, client *Client, goroutines int, forceRefresh bool, ttl time.Duration) {

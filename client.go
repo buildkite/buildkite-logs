@@ -258,17 +258,17 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 		}
 	}
 
-	// singleflight uses the leader's context for the shared refresh. If that
-	// context is canceled, all waiters observe the same refresh failure; waiters
-	// can still abandon their own wait via the select below.
+	// Decouple shared refresh work from the single caller that wins the
+	// singleflight race. Waiters can still abandon their own wait below.
+	refreshCtx := context.WithoutCancel(ctx)
 	inflightKey := blobKey
 	ch := c.refreshGroup.DoChan(inflightKey, func() (any, error) {
 		if !forceRefresh {
-			if usable, err := c.cacheUsable(ctx, blobKey, ttl); err == nil && usable {
+			if usable, err := c.cacheUsable(refreshCtx, blobKey, ttl); err == nil && usable {
 				return nil, nil
 			}
 		}
-		return nil, c.refreshBlobCache(ctx, api, org, pipeline, build, job, ttl, blobKey)
+		return nil, c.refreshBlobCache(refreshCtx, api, org, pipeline, build, job, ttl, blobKey)
 	})
 
 	select {
@@ -338,7 +338,6 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 		}
 		logReader = limitedReader
 	}
-	c.fireLogDownloadHook(ctx, org, pipeline, build, job, logDownloadDuration, logSize, nil)
 
 	logParsingStart := time.Now()
 	parser := NewParser()
@@ -361,6 +360,13 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 	logEntries, err := ExportSeq2ToParquetWithFilterAndStats(parser.All(logReader), tempPath, nil)
 	logParsingDuration := time.Since(logParsingStart)
 	if err != nil {
+		if isLogDownloadError(err) {
+			if logSize == 0 {
+				logSize = countingReader.consumed
+			}
+			c.fireLogDownloadHook(ctx, org, pipeline, build, job, time.Since(logDownloadStart), logSize, err)
+			return fmt.Errorf("failed to fetch logs from API: %w", err)
+		}
 		c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, 0, logEntries, err)
 		return fmt.Errorf("failed to export logs to parquet: %w", err)
 	}
@@ -373,6 +379,7 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 	if logSize == 0 {
 		logSize = countingReader.consumed
 	}
+	c.fireLogDownloadHook(ctx, org, pipeline, build, job, time.Since(logDownloadStart), logSize, nil)
 	c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, parquetSize, logEntries, nil)
 
 	blobStorageStart := time.Now()
@@ -540,6 +547,23 @@ func (c *Client) fireLocalCacheHook(ctx context.Context, org, pipeline, build, j
 			FileSize:  fileSize,
 		})
 	}
+}
+
+type logDownloadError struct {
+	err error
+}
+
+func (e *logDownloadError) Error() string {
+	return e.err.Error()
+}
+
+func (e *logDownloadError) Unwrap() error {
+	return e.err
+}
+
+func isLogDownloadError(err error) bool {
+	var downloadErr *logDownloadError
+	return errors.As(err, &downloadErr) || errors.Is(err, ErrLogTooLarge)
 }
 
 // countingReadCloser tracks bytes consumed from a streaming log reader.

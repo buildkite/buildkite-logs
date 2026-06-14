@@ -100,7 +100,6 @@ func TestBlobStorage_WriteWithMetadataFrom(t *testing.T) {
 		ParquetSize:  int64(len(testData)),
 		RowCount:     7,
 		ProcessedAt:  time.Now(),
-		Status:       "success",
 	}
 
 	if err := blobStorage.WriteWithMetadataFrom(ctx, key, strings.NewReader(testData), metadata); err != nil {
@@ -127,9 +126,6 @@ func TestBlobStorage_WriteWithMetadataFrom(t *testing.T) {
 	}
 	if readMetadata.RowCount != metadata.RowCount {
 		t.Fatalf("RowCount = %d, want %d", readMetadata.RowCount, metadata.RowCount)
-	}
-	if readMetadata.Status != metadata.Status {
-		t.Fatalf("Status = %q, want %q", readMetadata.Status, metadata.Status)
 	}
 }
 

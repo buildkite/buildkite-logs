@@ -292,8 +292,7 @@ func (c *Client) cacheUsable(ctx context.Context, blobKey string, ttl time.Durat
 		return true, nil
 	}
 
-	status := &JobStatus{IsTerminal: false}
-	return !status.ShouldRefreshCache(metadata.CachedAt, ttl), nil
+	return time.Since(metadata.CachedAt) <= ttl, nil
 }
 
 func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string, ttl time.Duration, blobKey string) error {
@@ -390,7 +389,6 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 		ParquetSize:  parquetSize,
 		RowCount:     logEntries,
 		ProcessedAt:  time.Now(),
-		Status:       "success",
 	}
 	parquetReader, err := os.Open(tempPath) //nolint:gosec // path from os.CreateTemp, not user input
 	if err != nil {

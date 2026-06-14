@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -258,6 +259,24 @@ func TestParquetSeq2Export(t *testing.T) {
 	}
 	if results[2].Content != "Some regular output" {
 		t.Errorf("Entry 2 content = %q", results[2].Content)
+	}
+}
+
+func TestParquetSeq2ExportWriter(t *testing.T) {
+	parser := NewParser()
+	testData := "\x1b_bk;t=1745322209921\x07first line\n" +
+		"\x1b_bk;t=1745322209922\x07second line"
+
+	var buf bytes.Buffer
+	rows, err := ExportSeq2ToParquetWriter(parser.All(strings.NewReader(testData)), &buf)
+	if err != nil {
+		t.Fatalf("ExportSeq2ToParquetWriter() error = %v", err)
+	}
+	if rows != 2 {
+		t.Fatalf("rows = %d, want 2", rows)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("expected parquet bytes to be written")
 	}
 }
 

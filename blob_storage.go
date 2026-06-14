@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,8 +35,7 @@ type BlobMetadata struct {
 	LogSize      int64     `json:"log_size_bytes,omitempty"`
 	ParquetSize  int64     `json:"parquet_size_bytes,omitempty"`
 	RowCount     int       `json:"row_count,omitempty"`
-	ProcessedAt  time.Time `json:"processed_at,omitempty"`
-	Status       string    `json:"status,omitempty"`
+	ProcessedAt  time.Time `json:"processed_at"`
 }
 
 // BlobStorageOptions contains configuration options for blob storage
@@ -211,9 +211,6 @@ func (bs *BlobStorage) WriteWithMetadataFrom(ctx context.Context, key string, r 
 		if !metadata.ProcessedAt.IsZero() {
 			opts.Metadata["processed_at"] = metadata.ProcessedAt.Format(time.RFC3339)
 		}
-		if metadata.Status != "" {
-			opts.Metadata["status"] = metadata.Status
-		}
 	}
 
 	writer, err := bs.bucket.NewWriter(ctx, key, opts)
@@ -264,21 +261,20 @@ func (bs *BlobStorage) ReadWithMetadata(ctx context.Context, key string) (*BlobM
 			}
 		}
 		if logSizeStr := attrMap["log_size_bytes"]; logSizeStr != "" {
-			if _, err := fmt.Sscanf(logSizeStr, "%d", &metadata.LogSize); err != nil {
-				metadata.LogSize = 0
+			if logSize, err := strconv.ParseInt(logSizeStr, 10, 64); err == nil {
+				metadata.LogSize = logSize
 			}
 		}
 		if parquetSizeStr := attrMap["parquet_size_bytes"]; parquetSizeStr != "" {
-			if _, err := fmt.Sscanf(parquetSizeStr, "%d", &metadata.ParquetSize); err != nil {
-				metadata.ParquetSize = 0
+			if parquetSize, err := strconv.ParseInt(parquetSizeStr, 10, 64); err == nil {
+				metadata.ParquetSize = parquetSize
 			}
 		}
 		if rowCountStr := attrMap["row_count"]; rowCountStr != "" {
-			if _, err := fmt.Sscanf(rowCountStr, "%d", &metadata.RowCount); err != nil {
-				metadata.RowCount = 0
+			if rowCount, err := strconv.Atoi(rowCountStr); err == nil {
+				metadata.RowCount = rowCount
 			}
 		}
-		metadata.Status = attrMap["status"]
 	}
 
 	return metadata, nil

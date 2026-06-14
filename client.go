@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/buildkite/go-buildkite/v5"
+	"golang.org/x/sync/singleflight"
 )
 
 // ErrLogTooLarge is returned when a job log exceeds the configured maximum size.
@@ -37,6 +38,18 @@ type AfterLogParsingFunc func(ctx context.Context, result *LogParsingResult)
 type AfterBlobStorageFunc func(ctx context.Context, result *BlobStorageResult)
 type AfterLocalCacheFunc func(ctx context.Context, result *LocalCacheResult)
 
+// Stage identifies the processing stage reported by hooks.
+type Stage string
+
+const (
+	StageCacheCheck  Stage = "cache_check"
+	StageJobStatus   Stage = "job_status"
+	StageLogDownload Stage = "log_download"
+	StageLogParsing  Stage = "log_parsing"
+	StageBlobStorage Stage = "blob_storage"
+	StageLocalCache  Stage = "local_cache"
+)
+
 // Hooks contains all registered hook functions
 type Hooks struct {
 	OnAfterCacheCheck  []AfterCacheCheckFunc
@@ -51,6 +64,9 @@ type Hooks struct {
 type BaseResult struct {
 	Org, Pipeline, Build, Job string
 	Duration                  time.Duration
+	Stage                     Stage
+	Success                   bool
+	Err                       error
 }
 
 // CacheCheckResult contains the result of checking blob storage cache
@@ -122,11 +138,12 @@ func (h *Hooks) AddAfterLocalCache(hook AfterLocalCacheFunc) {
 
 // Client provides a high-level convenience API for common buildkite-logs-parquet operations
 type Client struct {
-	api         BuildkiteAPI
-	storageURL  string
-	blobStorage *BlobStorage
-	hooks       *Hooks
-	maxLogBytes int64 // 0 means no limit
+	api          BuildkiteAPI
+	storageURL   string
+	blobStorage  *BlobStorage
+	hooks        *Hooks
+	maxLogBytes  int64 // 0 means no limit
+	refreshGroup singleflight.Group
 }
 
 // NewClient creates a new Client using the provided go-buildkite client
@@ -227,188 +244,138 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 
 	blobKey := GenerateBlobKey(org, pipeline, build, job)
 
-	// Check if blob already exists
 	cacheCheckStart := time.Now()
 	exists, err := c.blobStorage.Exists(ctx, blobKey)
+	cacheCheckDuration := time.Since(cacheCheckStart)
+	c.fireCacheCheckHook(ctx, org, pipeline, build, job, cacheCheckDuration, blobKey, exists, err)
 	if err != nil {
 		return "", fmt.Errorf("failed to check blob existence: %w", err)
 	}
 
-	cacheCheckDuration := time.Since(cacheCheckStart)
-
-	// Call after cache check hooks
-	for _, hook := range c.hooks.OnAfterCacheCheck {
-		hook(ctx, &CacheCheckResult{
-			BaseResult: BaseResult{
-				Org:      org,
-				Pipeline: pipeline,
-				Build:    build,
-				Job:      job,
-				Duration: cacheCheckDuration,
-			},
-			BlobKey: blobKey,
-			Exists:  exists,
-		})
-	}
-
-	// Get job status to determine caching strategy
-	jobStatusStart := time.Now()
-	jobStatus, err := api.GetJobStatus(ctx, org, pipeline, build, job)
-	if err != nil {
-		return "", fmt.Errorf("failed to get job status: %w", err)
-	}
-
-	jobStatusDuration := time.Since(jobStatusStart)
-
-	// Call after job status hooks
-	for _, hook := range c.hooks.OnAfterJobStatus {
-		hook(ctx, &JobStatusResult{
-			BaseResult: BaseResult{
-				Org:      org,
-				Pipeline: pipeline,
-				Build:    build,
-				Job:      job,
-				Duration: jobStatusDuration,
-			},
-			JobStatus: jobStatus,
-		})
-	}
-
-	// Check if we should use existing cache
 	if exists && !forceRefresh {
-		metadata, err := c.blobStorage.ReadWithMetadata(ctx, blobKey)
-		if err == nil && metadata != nil {
-			// For terminal jobs, always use cache
-			if metadata.IsTerminal {
-				return createLocalCacheFile(ctx, c.blobStorage, blobKey)
-			}
-
-			// For non-terminal jobs, check TTL
-			timeElapsed := time.Since(metadata.CachedAt)
-			if timeElapsed < ttl {
-				return createLocalCacheFile(ctx, c.blobStorage, blobKey)
-			}
+		if usable, err := c.cacheUsable(ctx, blobKey, ttl); err == nil && usable {
+			return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
 		}
 	}
 
-	// Download fresh logs from API
+	inflightKey := blobKey
+	if forceRefresh {
+		inflightKey += ":force"
+	}
+
+	ch := c.refreshGroup.DoChan(inflightKey, func() (any, error) {
+		if !forceRefresh {
+			if usable, err := c.cacheUsable(ctx, blobKey, ttl); err == nil && usable {
+				return nil, nil
+			}
+		}
+		return nil, c.refreshBlobCache(ctx, api, org, pipeline, build, job, ttl, blobKey)
+	})
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-ch:
+		if result.Err != nil {
+			return "", result.Err
+		}
+	}
+
+	return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
+}
+
+func (c *Client) cacheUsable(ctx context.Context, blobKey string, ttl time.Duration) (bool, error) {
+	metadata, err := c.blobStorage.ReadWithMetadata(ctx, blobKey)
+	if err != nil || metadata == nil {
+		return false, err
+	}
+	if metadata.IsTerminal {
+		return true, nil
+	}
+
+	status := &JobStatus{IsTerminal: false}
+	return !status.ShouldRefreshCache(metadata.CachedAt, ttl), nil
+}
+
+func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string, ttl time.Duration, blobKey string) error {
+	jobStatusStart := time.Now()
+	jobStatus, err := api.GetJobStatus(ctx, org, pipeline, build, job)
+	jobStatusDuration := time.Since(jobStatusStart)
+	c.fireJobStatusHook(ctx, org, pipeline, build, job, jobStatusDuration, jobStatus, err)
+	if err != nil {
+		return fmt.Errorf("failed to get job status: %w", err)
+	}
+
 	logDownloadStart := time.Now()
 	logReader, err := api.GetJobLog(ctx, org, pipeline, build, job)
+	logDownloadDuration := time.Since(logDownloadStart)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch logs from API: %w", err)
+		c.fireLogDownloadHook(ctx, org, pipeline, build, job, logDownloadDuration, 0, err)
+		return fmt.Errorf("failed to fetch logs from API: %w", err)
 	}
 	defer logReader.Close()
 
-	logDownloadDuration := time.Since(logDownloadStart)
-
 	var logSize int64
-	if logReader != nil {
-		// Get content length if available
-		if seeker, ok := logReader.(io.Seeker); ok {
-			if size, seekErr := seeker.Seek(0, 2); seekErr == nil {
-				logSize = size
-				if _, resetErr := seeker.Seek(0, 0); resetErr != nil {
-					// If we can't reset, continue anyway - the reader might still work
-					logSize = 0
-				}
+	if seeker, ok := logReader.(io.Seeker); ok {
+		if size, seekErr := seeker.Seek(0, io.SeekEnd); seekErr == nil {
+			logSize = size
+			if _, resetErr := seeker.Seek(0, io.SeekStart); resetErr != nil {
+				logSize = 0
 			}
 		}
 	}
 
-	// Enforce max log size limit
+	var limitedReader *limitedReadCloser
 	if c.maxLogBytes > 0 {
-		// If we know the size upfront, fail fast
 		if logSize > c.maxLogBytes {
-			return "", fmt.Errorf("%w: %d bytes exceeds limit of %d bytes", ErrLogTooLarge, logSize, c.maxLogBytes)
+			err := fmt.Errorf("%w: %d bytes exceeds limit of %d bytes", ErrLogTooLarge, logSize, c.maxLogBytes)
+			c.fireLogDownloadHook(ctx, org, pipeline, build, job, logDownloadDuration, logSize, err)
+			return err
 		}
-		// Wrap reader to enforce limit during streaming
-		logReader = &limitedReadCloser{
+		limitedReader = &limitedReadCloser{
 			rc:    logReader,
 			r:     io.LimitReader(logReader, c.maxLogBytes+1),
 			limit: c.maxLogBytes,
 		}
+		logReader = limitedReader
 	}
+	c.fireLogDownloadHook(ctx, org, pipeline, build, job, logDownloadDuration, logSize, nil)
 
-	// Call after log download hooks
-	for _, hook := range c.hooks.OnAfterLogDownload {
-		hook(ctx, &LogDownloadResult{
-			BaseResult: BaseResult{
-				Org:      org,
-				Pipeline: pipeline,
-				Build:    build,
-				Job:      job,
-				Duration: logDownloadDuration,
-			},
-			LogSize: logSize,
-		})
-	}
-
-	// Parse logs and convert to parquet data
 	logParsingStart := time.Now()
 	parser := NewParser()
-	var parquetData []byte
-
-	// Create a temporary file for parquet export
 	tempFile, err := os.CreateTemp("", "bklog-*.parquet")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
+		logParsingDuration := time.Since(logParsingStart)
+		c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, 0, 0, err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tempPath := tempFile.Name()
+	if err := tempFile.Close(); err != nil {
+		logParsingDuration := time.Since(logParsingStart)
+		c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, 0, 0, err)
+		return fmt.Errorf("failed to close temp file before export: %w", err)
+	}
 	defer func() {
-		tempFile.Close()
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 	}()
 
-	// Export logs to parquet using streaming approach
-	if err := ExportSeq2ToParquet(parser.All(logReader), tempPath); err != nil {
-		logParsingDuration := time.Since(logParsingStart)
-
-		// Call after log parsing hooks (with error)
-		for _, hook := range c.hooks.OnAfterLogParsing {
-			hook(ctx, &LogParsingResult{
-				BaseResult: BaseResult{
-					Org:      org,
-					Pipeline: pipeline,
-					Build:    build,
-					Job:      job,
-					Duration: logParsingDuration,
-				},
-				ParquetSize: 0,
-				LogEntries:  0,
-			})
-		}
-		return "", fmt.Errorf("failed to export logs to parquet: %w", err)
-	}
-
-	err = tempFile.Close()
-	if err != nil {
-		return "", fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	// Read the parquet data
-	parquetData, err = os.ReadFile(tempPath) //nolint:gosec // path from os.CreateTemp, not user input
-	if err != nil {
-		return "", fmt.Errorf("failed to read parquet data: %w", err)
-	}
-
+	logEntries, err := ExportSeq2ToParquetWithFilterAndStats(parser.All(logReader), tempPath, nil)
 	logParsingDuration := time.Since(logParsingStart)
-
-	// Call after log parsing hooks
-	for _, hook := range c.hooks.OnAfterLogParsing {
-		hook(ctx, &LogParsingResult{
-			BaseResult: BaseResult{
-				Org:      org,
-				Pipeline: pipeline,
-				Build:    build,
-				Job:      job,
-				Duration: logParsingDuration,
-			},
-			ParquetSize: int64(len(parquetData)),
-			LogEntries:  0, // Consumer can count if needed
-		})
+	if err != nil {
+		c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, 0, logEntries, err)
+		return fmt.Errorf("failed to export logs to parquet: %w", err)
 	}
+	fileInfo, err := os.Stat(tempPath) //nolint:gosec // path from os.CreateTemp, not user input
+	if err != nil {
+		c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, 0, logEntries, err)
+		return fmt.Errorf("failed to measure parquet data: %w", err)
+	}
+	parquetSize := fileInfo.Size()
+	if limitedReader != nil && logSize == 0 {
+		logSize = limitedReader.consumed
+	}
+	c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, parquetSize, logEntries, nil)
 
-	// Store in blob storage with metadata
 	blobStorageStart := time.Now()
 	metadata := &BlobMetadata{
 		JobID:        job,
@@ -419,16 +386,125 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 		Organization: org,
 		Pipeline:     pipeline,
 		Build:        build,
+		LogSize:      logSize,
+		ParquetSize:  parquetSize,
+		RowCount:     logEntries,
+		ProcessedAt:  time.Now(),
+		Status:       "success",
 	}
-
-	err = c.blobStorage.WriteWithMetadata(ctx, blobKey, parquetData, metadata)
+	parquetReader, err := os.Open(tempPath) //nolint:gosec // path from os.CreateTemp, not user input
 	if err != nil {
-		return "", fmt.Errorf("failed to write to blob storage: %w", err)
+		blobStorageDuration := time.Since(blobStorageStart)
+		c.fireBlobStorageHook(ctx, org, pipeline, build, job, blobStorageDuration, blobKey, parquetSize, jobStatus.IsTerminal, ttl, err)
+		return fmt.Errorf("failed to open parquet data: %w", err)
+	}
+	defer parquetReader.Close()
+
+	err = c.blobStorage.WriteWithMetadataFrom(ctx, blobKey, parquetReader, metadata)
+	blobStorageDuration := time.Since(blobStorageStart)
+	c.fireBlobStorageHook(ctx, org, pipeline, build, job, blobStorageDuration, blobKey, parquetSize, jobStatus.IsTerminal, ttl, err)
+	if err != nil {
+		return fmt.Errorf("failed to write to blob storage: %w", err)
 	}
 
-	blobStorageDuration := time.Since(blobStorageStart)
+	return nil
+}
 
-	// Call after blob storage hooks
+func (c *Client) createLocalCacheFileWithHooks(ctx context.Context, org, pipeline, build, job, blobKey string) (string, error) {
+	localCacheStart := time.Now()
+	localPath, err := createLocalCacheFile(ctx, c.blobStorage, blobKey)
+	localCacheDuration := time.Since(localCacheStart)
+
+	var fileSize int64
+	if err == nil {
+		if stat, statErr := os.Stat(localPath); statErr == nil { //nolint:gosec // path from createLocalCacheFile, not user input
+			fileSize = stat.Size()
+		}
+	}
+
+	c.fireLocalCacheHook(ctx, org, pipeline, build, job, localCacheDuration, localPath, fileSize, err)
+	if err != nil {
+		return "", fmt.Errorf("failed to create local cache file: %w", err)
+	}
+
+	return localPath, nil
+}
+
+func (c *Client) fireCacheCheckHook(ctx context.Context, org, pipeline, build, job string, duration time.Duration, blobKey string, exists bool, err error) {
+	for _, hook := range c.hooks.OnAfterCacheCheck {
+		hook(ctx, &CacheCheckResult{
+			BaseResult: BaseResult{
+				Org:      org,
+				Pipeline: pipeline,
+				Build:    build,
+				Job:      job,
+				Duration: duration,
+				Stage:    StageCacheCheck,
+				Success:  err == nil,
+				Err:      err,
+			},
+			BlobKey: blobKey,
+			Exists:  exists,
+		})
+	}
+}
+
+func (c *Client) fireJobStatusHook(ctx context.Context, org, pipeline, build, job string, duration time.Duration, jobStatus *JobStatus, err error) {
+	for _, hook := range c.hooks.OnAfterJobStatus {
+		hook(ctx, &JobStatusResult{
+			BaseResult: BaseResult{
+				Org:      org,
+				Pipeline: pipeline,
+				Build:    build,
+				Job:      job,
+				Duration: duration,
+				Stage:    StageJobStatus,
+				Success:  err == nil,
+				Err:      err,
+			},
+			JobStatus: jobStatus,
+		})
+	}
+}
+
+func (c *Client) fireLogDownloadHook(ctx context.Context, org, pipeline, build, job string, duration time.Duration, logSize int64, err error) {
+	for _, hook := range c.hooks.OnAfterLogDownload {
+		hook(ctx, &LogDownloadResult{
+			BaseResult: BaseResult{
+				Org:      org,
+				Pipeline: pipeline,
+				Build:    build,
+				Job:      job,
+				Duration: duration,
+				Stage:    StageLogDownload,
+				Success:  err == nil,
+				Err:      err,
+			},
+			LogSize: logSize,
+		})
+	}
+}
+
+func (c *Client) fireLogParsingHook(ctx context.Context, org, pipeline, build, job string, duration time.Duration, parquetSize int64, logEntries int, err error) {
+	for _, hook := range c.hooks.OnAfterLogParsing {
+		hook(ctx, &LogParsingResult{
+			BaseResult: BaseResult{
+				Org:      org,
+				Pipeline: pipeline,
+				Build:    build,
+				Job:      job,
+				Duration: duration,
+				Stage:    StageLogParsing,
+				Success:  err == nil,
+				Err:      err,
+			},
+			ParquetSize: parquetSize,
+			LogEntries:  logEntries,
+		})
+	}
+}
+
+func (c *Client) fireBlobStorageHook(ctx context.Context, org, pipeline, build, job string, duration time.Duration, blobKey string, dataSize int64, isTerminal bool, ttl time.Duration, err error) {
 	for _, hook := range c.hooks.OnAfterBlobStorage {
 		hook(ctx, &BlobStorageResult{
 			BaseResult: BaseResult{
@@ -436,31 +512,20 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 				Pipeline: pipeline,
 				Build:    build,
 				Job:      job,
-				Duration: blobStorageDuration,
+				Duration: duration,
+				Stage:    StageBlobStorage,
+				Success:  err == nil,
+				Err:      err,
 			},
 			BlobKey:    blobKey,
-			DataSize:   int64(len(parquetData)),
-			IsTerminal: jobStatus.IsTerminal,
+			DataSize:   dataSize,
+			IsTerminal: isTerminal,
 			TTL:        ttl,
 		})
 	}
+}
 
-	// Create local cache file directly from in-memory data,
-	// avoiding a redundant blob storage read.
-	localCacheStart := time.Now()
-	localPath, err := createLocalCacheFileFromData(parquetData)
-	if err != nil {
-		return "", fmt.Errorf("failed to create local cache file: %w", err)
-	}
-
-	localCacheDuration := time.Since(localCacheStart)
-
-	var fileSize int64
-	if stat, statErr := os.Stat(localPath); statErr == nil { //nolint:gosec // path from createLocalCacheFileFromData, not user input
-		fileSize = stat.Size()
-	}
-
-	// Call after local cache hooks
+func (c *Client) fireLocalCacheHook(ctx context.Context, org, pipeline, build, job string, duration time.Duration, localPath string, fileSize int64, err error) {
 	for _, hook := range c.hooks.OnAfterLocalCache {
 		hook(ctx, &LocalCacheResult{
 			BaseResult: BaseResult{
@@ -468,14 +533,15 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 				Pipeline: pipeline,
 				Build:    build,
 				Job:      job,
-				Duration: localCacheDuration,
+				Duration: duration,
+				Stage:    StageLocalCache,
+				Success:  err == nil,
+				Err:      err,
 			},
 			LocalPath: localPath,
 			FileSize:  fileSize,
 		})
 	}
-
-	return localPath, nil
 }
 
 // limitedReadCloser wraps a reader with a size limit, returning ErrLogTooLarge

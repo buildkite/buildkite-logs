@@ -2,6 +2,7 @@ package buildkitelogs
 
 import (
 	"context"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -67,6 +68,68 @@ func TestBlobStorage(t *testing.T) {
 
 	if readMetadata.IsTerminal != metadata.IsTerminal {
 		t.Errorf("Expected IsTerminal %t, got %t", metadata.IsTerminal, readMetadata.IsTerminal)
+	}
+}
+
+func TestBlobStorage_WriteWithMetadataFrom(t *testing.T) {
+	ctx := context.Background()
+	tempDir, err := os.MkdirTemp("", "bklog-blob-stream-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	blobStorage, err := NewBlobStorage(ctx, "file://"+tempDir, nil)
+	if err != nil {
+		t.Fatalf("Failed to create blob storage: %v", err)
+	}
+	defer blobStorage.Close()
+
+	key := "test-stream.parquet"
+	testData := "streamed parquet data"
+	metadata := &BlobMetadata{
+		JobID:        "abc-def",
+		JobState:     "finished",
+		IsTerminal:   true,
+		CachedAt:     time.Now(),
+		TTL:          "30s",
+		Organization: "test-org",
+		Pipeline:     "test-pipeline",
+		Build:        "123",
+		LogSize:      int64(len(testData)),
+		ParquetSize:  int64(len(testData)),
+		RowCount:     7,
+		ProcessedAt:  time.Now(),
+		Status:       "success",
+	}
+
+	if err := blobStorage.WriteWithMetadataFrom(ctx, key, strings.NewReader(testData), metadata); err != nil {
+		t.Fatalf("WriteWithMetadataFrom: %v", err)
+	}
+
+	reader, err := blobStorage.Reader(ctx, key)
+	if err != nil {
+		t.Fatalf("Reader: %v", err)
+	}
+	defer reader.Close()
+
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != testData {
+		t.Fatalf("blob data = %q, want %q", string(got), testData)
+	}
+
+	readMetadata, err := blobStorage.ReadWithMetadata(ctx, key)
+	if err != nil {
+		t.Fatalf("ReadWithMetadata: %v", err)
+	}
+	if readMetadata.RowCount != metadata.RowCount {
+		t.Fatalf("RowCount = %d, want %d", readMetadata.RowCount, metadata.RowCount)
+	}
+	if readMetadata.Status != metadata.Status {
+		t.Fatalf("Status = %q, want %q", readMetadata.Status, metadata.Status)
 	}
 }
 

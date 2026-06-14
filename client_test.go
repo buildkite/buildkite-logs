@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,16 +19,49 @@ type mockBuildkiteAPI struct {
 	jobStatus      *JobStatus
 	getLogCalls    int
 	getStatusCalls int
+	logDelay       time.Duration
+	statusErr      error
+	logErr         error
+	mu             sync.Mutex
 }
 
 func (m *mockBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
+	if m.logDelay > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(m.logDelay):
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.getLogCalls++
+	if m.logErr != nil {
+		return nil, m.logErr
+	}
 	return io.NopCloser(strings.NewReader(m.logContent)), nil
 }
 
 func (m *mockBuildkiteAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.getStatusCalls++
+	if m.statusErr != nil {
+		return nil, m.statusErr
+	}
 	return m.jobStatus, nil
+}
+
+func (m *mockBuildkiteAPI) calls() (int, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getLogCalls, m.getStatusCalls
+}
+
+func (m *mockBuildkiteAPI) setJobStatus(status *JobStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobStatus = status
 }
 
 func newTerminalMock() *mockBuildkiteAPI {
@@ -146,6 +180,134 @@ func TestClient_NewReader_CacheHit(t *testing.T) {
 
 	if mock.getLogCalls != initialLogCalls {
 		t.Errorf("expected no additional log downloads on cache hit, got %d extra calls", mock.getLogCalls-initialLogCalls)
+	}
+	if _, statusCalls := mock.calls(); statusCalls != 1 {
+		t.Errorf("expected terminal cache hit to skip job status, got %d status calls", statusCalls)
+	}
+}
+
+func TestClient_ConcurrentCacheMiss_SingleFlight(t *testing.T) {
+	mock := newTerminalMock()
+	mock.logDelay = 25 * time.Millisecond
+	client := newTestClient(t, mock)
+
+	const goroutines = 8
+	runConcurrentReaders(t, client, goroutines, false, time.Minute)
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 1 {
+		t.Fatalf("GetJobLog calls = %d, want 1", logCalls)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	}
+}
+
+func TestClient_ConcurrentTTLExpiry_RefreshOnce(t *testing.T) {
+	mock := &mockBuildkiteAPI{
+		logContent: "\x1b_bk;t=1745322209921\x07running log entry\n",
+		jobStatus:  &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
+		logDelay:   25 * time.Millisecond,
+	}
+	client := newTestClient(t, mock)
+
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Nanosecond, false)
+	if err != nil {
+		t.Fatalf("initial NewReader: %v", err)
+	}
+	defer reader.Close()
+	time.Sleep(time.Millisecond)
+
+	runConcurrentReaders(t, client, 8, false, time.Nanosecond)
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 2 {
+		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
+	}
+	if statusCalls != 2 {
+		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+}
+
+func TestClient_ConcurrentForceRefresh_Coalesces(t *testing.T) {
+	mock := newTerminalMock()
+	mock.logDelay = 25 * time.Millisecond
+	client := newTestClient(t, mock)
+
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("initial NewReader: %v", err)
+	}
+	defer reader.Close()
+
+	runConcurrentReaders(t, client, 8, true, time.Minute)
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 2 {
+		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
+	}
+	if statusCalls != 2 {
+		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+}
+
+func TestClient_NewReader_JobStatusErrorHook(t *testing.T) {
+	statusErr := errors.New("status unavailable")
+	mock := &mockBuildkiteAPI{
+		logContent: "\x1b_bk;t=1745322209921\x07Test log entry\n",
+		jobStatus:  &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
+		statusErr:  statusErr,
+	}
+	client := newTestClient(t, mock)
+
+	var hookResult *JobStatusResult
+	client.Hooks().AddAfterJobStatus(func(ctx context.Context, r *JobStatusResult) {
+		hookResult = r
+	})
+
+	_, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err == nil {
+		t.Fatal("expected NewReader to fail")
+	}
+	if hookResult == nil {
+		t.Fatal("expected job status hook to fire")
+	}
+	if hookResult.Success {
+		t.Fatal("expected hook result to report failure")
+	}
+	if !errors.Is(hookResult.Err, statusErr) {
+		t.Fatalf("hook error = %v, want %v", hookResult.Err, statusErr)
+	}
+	if hookResult.Stage != StageJobStatus {
+		t.Fatalf("hook stage = %q, want %q", hookResult.Stage, StageJobStatus)
+	}
+}
+
+func runConcurrentReaders(t *testing.T, client *Client, goroutines int, forceRefresh bool, ttl time.Duration) {
+	t.Helper()
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", ttl, forceRefresh)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer reader.Close()
+			if _, err := reader.GetFileInfo(); err != nil {
+				errs <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent NewReader failed: %v", err)
 	}
 }
 

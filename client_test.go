@@ -223,6 +223,25 @@ func TestClient_ConcurrentTTLExpiry_RefreshOnce(t *testing.T) {
 	}
 }
 
+func TestClient_NewReader_RecordsLogSizeWithoutLimit(t *testing.T) {
+	mock := newTerminalMock()
+	client := newTestClient(t, mock, WithMaxLogBytes(0))
+
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	defer reader.Close()
+
+	metadata, err := client.blobStorage.ReadWithMetadata(t.Context(), GenerateBlobKey("org", "pipeline", "123", "job-1"))
+	if err != nil {
+		t.Fatalf("ReadWithMetadata: %v", err)
+	}
+	if metadata.LogSize != int64(len(mock.logContent)) {
+		t.Fatalf("LogSize = %d, want %d", metadata.LogSize, len(mock.logContent))
+	}
+}
+
 func TestClient_ConcurrentForceRefresh_Coalesces(t *testing.T) {
 	mock := newTerminalMock()
 	mock.logDelay = 25 * time.Millisecond
@@ -235,6 +254,53 @@ func TestClient_ConcurrentForceRefresh_Coalesces(t *testing.T) {
 	defer reader.Close()
 
 	runConcurrentReaders(t, client, 8, true, time.Minute)
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 2 {
+		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
+	}
+	if statusCalls != 2 {
+		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+}
+
+func TestClient_ConcurrentForceAndTTLRefresh_Coalesce(t *testing.T) {
+	mock := &mockBuildkiteAPI{
+		logContent: "\x1b_bk;t=1745322209921\x07running log entry\n",
+		jobStatus:  &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
+		logDelay:   25 * time.Millisecond,
+	}
+	client := newTestClient(t, mock)
+
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Nanosecond, false)
+	if err != nil {
+		t.Fatalf("initial NewReader: %v", err)
+	}
+	defer reader.Close()
+	time.Sleep(time.Millisecond)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, forceRefresh := range []bool{false, true} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Nanosecond, forceRefresh)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer reader.Close()
+			if _, err := reader.GetFileInfo(); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent NewReader failed: %v", err)
+	}
 
 	logCalls, statusCalls := mock.calls()
 	if logCalls != 2 {

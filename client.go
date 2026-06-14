@@ -258,11 +258,10 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 		}
 	}
 
+	// singleflight uses the leader's context for the shared refresh. If that
+	// context is canceled, all waiters observe the same refresh failure; waiters
+	// can still abandon their own wait via the select below.
 	inflightKey := blobKey
-	if forceRefresh {
-		inflightKey += ":force"
-	}
-
 	ch := c.refreshGroup.DoChan(inflightKey, func() (any, error) {
 		if !forceRefresh {
 			if usable, err := c.cacheUsable(ctx, blobKey, ttl); err == nil && usable {
@@ -325,14 +324,15 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 		}
 	}
 
-	var limitedReader *limitedReadCloser
+	countingReader := &countingReadCloser{rc: logReader}
+	logReader = countingReader
 	if c.maxLogBytes > 0 {
 		if logSize > c.maxLogBytes {
 			err := fmt.Errorf("%w: %d bytes exceeds limit of %d bytes", ErrLogTooLarge, logSize, c.maxLogBytes)
 			c.fireLogDownloadHook(ctx, org, pipeline, build, job, logDownloadDuration, logSize, err)
 			return err
 		}
-		limitedReader = &limitedReadCloser{
+		limitedReader := &limitedReadCloser{
 			rc:    logReader,
 			r:     io.LimitReader(logReader, c.maxLogBytes+1),
 			limit: c.maxLogBytes,
@@ -371,8 +371,8 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 		return fmt.Errorf("failed to measure parquet data: %w", err)
 	}
 	parquetSize := fileInfo.Size()
-	if limitedReader != nil && logSize == 0 {
-		logSize = limitedReader.consumed
+	if logSize == 0 {
+		logSize = countingReader.consumed
 	}
 	c.fireLogParsingHook(ctx, org, pipeline, build, job, logParsingDuration, parquetSize, logEntries, nil)
 
@@ -542,6 +542,22 @@ func (c *Client) fireLocalCacheHook(ctx context.Context, org, pipeline, build, j
 			FileSize:  fileSize,
 		})
 	}
+}
+
+// countingReadCloser tracks bytes consumed from a streaming log reader.
+type countingReadCloser struct {
+	rc       io.ReadCloser
+	consumed int64
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := c.rc.Read(p)
+	c.consumed += int64(n)
+	return n, err
+}
+
+func (c *countingReadCloser) Close() error {
+	return c.rc.Close()
 }
 
 // limitedReadCloser wraps a reader with a size limit, returning ErrLogTooLarge

@@ -58,12 +58,6 @@ func (m *mockBuildkiteAPI) calls() (int, int) {
 	return m.getLogCalls, m.getStatusCalls
 }
 
-func (m *mockBuildkiteAPI) setJobStatus(status *JobStatus) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.jobStatus = status
-}
-
 func newTerminalMock() *mockBuildkiteAPI {
 	return &mockBuildkiteAPI{
 		logContent: "\x1b_bk;t=1745322209921\x07Test log entry\n",

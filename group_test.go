@@ -3,10 +3,12 @@ package buildkitelogs
 import (
 	"strings"
 	"testing"
+
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 func TestGroupTracking(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	testData := []string{
 		"\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
@@ -41,7 +43,7 @@ func TestGroupTracking(t *testing.T) {
 }
 
 func TestGroupTrackingWithIterator(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	testData := `~~~ Running global environment hook
 [90m$[0m /buildkite/agent/hooks/environment
@@ -52,8 +54,6 @@ Another line of output
 Test output line`
 
 	reader := strings.NewReader(testData)
-	iterator := parser.NewIterator(reader)
-
 	expectedGroups := []string{
 		"~~~ Running global environment hook",
 		"~~~ Running global environment hook",
@@ -65,9 +65,10 @@ Test output line`
 	}
 
 	i := 0
-	for iterator.Next() {
-		entry := iterator.Entry()
-
+	for entry, err := range parser.All(reader) {
+		if err != nil {
+			t.Fatalf("All() error: %v", err)
+		}
 		if i >= len(expectedGroups) {
 			t.Fatalf("More entries than expected")
 		}
@@ -78,24 +79,20 @@ Test output line`
 		i++
 	}
 
-	if err := iterator.Err(); err != nil {
-		t.Fatalf("Iterator error: %v", err)
-	}
-
 	if i != len(expectedGroups) {
 		t.Fatalf("Expected %d entries, got %d", len(expectedGroups), i)
 	}
 }
 
 func TestGroupTrackingMalformedTimestamp(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	testData := "\x1b_bk;t=invalid\x07~~~ Setup phase\n" +
 		"\x1b_bk;t=1745322209922\x07some output"
 
 	reader := strings.NewReader(testData)
 
-	var entries []*LogEntry
+	var entries []*logparser.Entry
 	for entry, err := range parser.All(reader) {
 		if err != nil {
 			t.Fatalf("All() error = %v", err)

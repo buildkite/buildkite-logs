@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/buildkite/buildkite-logs/logparser"
 	"github.com/buildkite/go-buildkite/v5"
 	"golang.org/x/sync/singleflight"
 )
@@ -403,7 +404,7 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 	}
 
 	logParsingStart := time.Now()
-	parser := NewParser()
+	parser := logparser.New(defaultClientParserOptions())
 	tempFile, err := os.CreateTemp("", "bklog-*.parquet")
 	if err != nil {
 		logParsingDuration := time.Since(logParsingStart)
@@ -476,6 +477,12 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 	}
 
 	return nil
+}
+
+func defaultClientParserOptions() logparser.Options {
+	options := logparser.DefaultOptions()
+	options.TruncateLongLines = true
+	return options
 }
 
 func (c *Client) createLocalCacheFileWithHooks(ctx context.Context, org, pipeline, build, job, blobKey string) (string, error) {

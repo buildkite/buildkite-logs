@@ -9,6 +9,7 @@ import (
 	"os"
 
 	buildkitelogs "github.com/buildkite/buildkite-logs"
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 func handleParseCommand() {
@@ -22,6 +23,8 @@ func handleParseCommand() {
 	parseFlags.BoolVar(&config.ShowGroups, "groups", false, "Show group/section information")
 	parseFlags.StringVar(&config.ParquetFile, "parquet", "", "Export to Parquet file (e.g., output.parquet)")
 	parseFlags.StringVar(&config.JSONLFile, "jsonl", "", "Export to JSON Lines file (e.g., output.jsonl)")
+	parseFlags.IntVar(&config.MaxLineBytes, "max-line-bytes", logparser.DefaultMaxLineBytes, "Maximum bytes allowed in a single log line")
+	parseFlags.BoolVar(&config.TruncateLongLines, "truncate-long-lines", false, "Truncate log lines that exceed -max-line-bytes instead of returning an error")
 	// Buildkite API parameters
 	parseFlags.StringVar(&config.Organization, "org", "", "Buildkite organization slug (for API)")
 	parseFlags.StringVar(&config.Pipeline, "pipeline", "", "Buildkite pipeline slug (for API)")
@@ -132,7 +135,10 @@ func runParse(ctx context.Context, config *Config) error {
 		BytesProcessed: bytesProcessed,
 	}
 
-	parser := buildkitelogs.NewParser()
+	parserOptions := logparser.DefaultOptions()
+	parserOptions.MaxLineBytes = config.MaxLineBytes
+	parserOptions.TruncateLongLines = config.TruncateLongLines
+	parser := logparser.New(parserOptions)
 
 	// Handle export options
 	switch {
@@ -161,7 +167,7 @@ func runParse(ctx context.Context, config *Config) error {
 	return nil
 }
 
-func outputSeq2(reader io.Reader, parser *buildkitelogs.Parser, outputJSON bool, filter string, showGroups bool, summary *ProcessingSummary) error {
+func outputSeq2(reader io.Reader, parser *logparser.Parser, outputJSON bool, filter string, showGroups bool, summary *ProcessingSummary) error {
 
 	if outputJSON {
 		return outputJSONSeq2(reader, parser, filter, showGroups, summary)
@@ -169,7 +175,7 @@ func outputSeq2(reader io.Reader, parser *buildkitelogs.Parser, outputJSON bool,
 	return outputTextSeq2(reader, parser, filter, showGroups, summary)
 }
 
-func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter string, showGroups bool, summary *ProcessingSummary) error {
+func outputJSONSeq2(reader io.Reader, parser *logparser.Parser, filter string, showGroups bool, summary *ProcessingSummary) error {
 	type JSONEntry struct {
 		Timestamp string `json:"timestamp,omitempty"`
 		Content   string `json:"content"`
@@ -224,7 +230,7 @@ func outputJSONSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 	return encoder.Encode(jsonEntries)
 }
 
-func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter string, showGroups bool, summary *ProcessingSummary) error {
+func outputTextSeq2(reader io.Reader, parser *logparser.Parser, filter string, showGroups bool, summary *ProcessingSummary) error {
 	for entry, err := range parser.All(reader) {
 		if err != nil {
 			return fmt.Errorf("parse error: %w", err)
@@ -267,7 +273,7 @@ func outputTextSeq2(reader io.Reader, parser *buildkitelogs.Parser, filter strin
 	return nil
 }
 
-func shouldIncludeEntry(entry *buildkitelogs.LogEntry, filter string) bool {
+func shouldIncludeEntry(entry *logparser.Entry, filter string) bool {
 	switch filter {
 	case "command":
 		return false // Commands filter no longer supported
@@ -278,17 +284,17 @@ func shouldIncludeEntry(entry *buildkitelogs.LogEntry, filter string) bool {
 	}
 }
 
-func exportToParquetSeq2(reader io.Reader, parser *buildkitelogs.Parser, filename string, filter string, summary *ProcessingSummary) error {
+func exportToParquetSeq2(reader io.Reader, parser *logparser.Parser, filename string, filter string, summary *ProcessingSummary) error {
 	// Create filter function based on filter string
-	var filterFunc func(*buildkitelogs.LogEntry) bool
+	var filterFunc func(*logparser.Entry) bool
 	if filter != "" {
-		filterFunc = func(entry *buildkitelogs.LogEntry) bool {
+		filterFunc = func(entry *logparser.Entry) bool {
 			return shouldIncludeEntry(entry, filter)
 		}
 	}
 
 	// Create a sequence that counts entries for summary and handles errors
-	countingSeq := func(yield func(*buildkitelogs.LogEntry, error) bool) {
+	countingSeq := func(yield func(*logparser.Entry, error) bool) {
 		lineNum := 0
 		for entry, err := range parser.All(reader) {
 			lineNum++
@@ -329,11 +335,11 @@ func exportToParquetSeq2(reader io.Reader, parser *buildkitelogs.Parser, filenam
 	return buildkitelogs.ExportSeq2ToParquetWithFilter(countingSeq, filename, filterFunc)
 }
 
-func exportToJSONLSeq2(reader io.Reader, parser *buildkitelogs.Parser, filename string, filter string, summary *ProcessingSummary) error {
+func exportToJSONLSeq2(reader io.Reader, parser *logparser.Parser, filename string, filter string, summary *ProcessingSummary) error {
 	// Create filter function based on filter string
-	var filterFunc func(*buildkitelogs.LogEntry) bool
+	var filterFunc func(*logparser.Entry) bool
 	if filter != "" {
-		filterFunc = func(entry *buildkitelogs.LogEntry) bool {
+		filterFunc = func(entry *logparser.Entry) bool {
 			return shouldIncludeEntry(entry, filter)
 		}
 	}

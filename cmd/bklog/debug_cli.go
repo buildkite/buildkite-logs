@@ -1,29 +1,32 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"time"
 
-	buildkitelogs "github.com/buildkite/buildkite-logs"
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 type DebugConfig struct {
-	LogFile    string
-	Mode       string
-	StartLine  int
-	EndLine    int
-	Limit      int
-	ShowHex    bool
-	ShowRaw    bool
-	ShowParsed bool
-	Verbose    bool
-	CSVOutput  string
+	LogFile           string
+	Mode              string
+	StartLine         int
+	EndLine           int
+	Limit             int
+	ShowHex           bool
+	ShowRaw           bool
+	ShowParsed        bool
+	Verbose           bool
+	CSVOutput         string
+	MaxLineBytes      int
+	TruncateLongLines bool
 }
 
 func handleDebugCommand() {
@@ -40,6 +43,8 @@ func handleDebugCommand() {
 	debugFlags.BoolVar(&config.ShowParsed, "parsed", true, "Show parsed log entry")
 	debugFlags.BoolVar(&config.Verbose, "verbose", false, "Show detailed parsing information")
 	debugFlags.StringVar(&config.CSVOutput, "csv", "", "Output CSV file for extract-timestamps mode")
+	debugFlags.IntVar(&config.MaxLineBytes, "max-line-bytes", logparser.DefaultMaxLineBytes, "Maximum bytes allowed in a single log line")
+	debugFlags.BoolVar(&config.TruncateLongLines, "truncate-long-lines", false, "Truncate log lines that exceed -max-line-bytes instead of returning an error")
 
 	debugFlags.Usage = func() {
 		fmt.Printf("Usage: %s debug [options]\n\n", os.Args[0])
@@ -92,10 +97,9 @@ func runDebug(config *DebugConfig) error {
 		return extractTimestampsToCSV(config)
 	}
 
-	parser := buildkitelogs.NewParser()
-	scanner := bufio.NewScanner(file)
-
-	lineNum := 0
+	parserOptions := debugParserOptions(config)
+	parser := logparser.New(parserOptions)
+	lineReader := logparser.NewLineReader(file, parserOptions)
 	processed := 0
 
 	// Calculate end line
@@ -112,48 +116,61 @@ func runDebug(config *DebugConfig) error {
 	fmt.Printf("File: %s\n", config.LogFile)
 	fmt.Printf("Lines: %d-%d\n\n", config.StartLine, endLine)
 
-	for scanner.Scan() {
-		lineNum++
+	for {
+		line, err := lineReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
 
 		// Skip lines before start
-		if lineNum < config.StartLine {
+		if line.Number < config.StartLine {
 			continue
 		}
 
 		// Stop after end line or limit reached
-		if lineNum > endLine || (config.Limit > 0 && processed >= config.Limit) {
+		if line.Number > endLine || (config.Limit > 0 && processed >= config.Limit) {
 			break
 		}
 
-		line := scanner.Text()
 		processed++
 
-		fmt.Printf("--- Line %d ---\n", lineNum)
+		lineText := string(line.Bytes)
+		fmt.Printf("--- Line %d", line.Number)
+		if line.Truncated {
+			fmt.Printf(" (truncated)")
+		}
+		fmt.Println(" ---")
 
 		switch config.Mode {
 		case "hex":
-			showHexDump(line)
+			showHexDump(lineText)
 		case "lines":
-			showRawLine(line)
+			showRawLine(lineText)
 		case "parse":
 			if err := showParseDebug(parser, line, config); err != nil {
-				fmt.Printf("Parse error: %v\n", err)
+				printParseError(err)
 			}
 		default:
 			if err := showParseDebug(parser, line, config); err != nil {
-				fmt.Printf("Parse error: %v\n", err)
+				printParseError(err)
 			}
 		}
 
 		fmt.Println()
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading file: %w", err)
-	}
-
 	fmt.Printf("Processed %d lines\n", processed)
 	return nil
+}
+
+func debugParserOptions(config *DebugConfig) logparser.Options {
+	options := logparser.DefaultOptions()
+	options.MaxLineBytes = config.MaxLineBytes
+	options.TruncateLongLines = config.TruncateLongLines
+	return options
 }
 
 // extractTimestampsToCSV extracts all OSC timestamps from the log file and exports to CSV
@@ -178,16 +195,20 @@ func extractTimestampsToCSV(config *DebugConfig) error {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
+	lineReader := logparser.NewLineReader(file, debugParserOptions(config))
 	totalTimestamps := 0
 
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Bytes()
+	for {
+		line, err := lineReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
 
 		// Extract all OSC sequences from this line
-		timestamps := extractAllOSCTimestamps(line, lineNum)
+		timestamps := extractAllOSCTimestamps(line.Bytes, line.Number)
 		totalTimestamps += len(timestamps)
 
 		// Write each timestamp to CSV
@@ -204,11 +225,7 @@ func extractTimestampsToCSV(config *DebugConfig) error {
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading file: %w", err)
-	}
-
-	fmt.Printf("Extracted %d timestamps from %d lines to %s\n", totalTimestamps, lineNum, config.CSVOutput)
+	fmt.Printf("Extracted %d timestamps to %s\n", totalTimestamps, config.CSVOutput)
 	return nil
 }
 
@@ -313,17 +330,18 @@ func showRawLine(line string) {
 	fmt.Printf("Length: %d\n", len(line))
 }
 
-func showParseDebug(parser *buildkitelogs.Parser, line string, config *DebugConfig) error {
+func showParseDebug(parser *logparser.Parser, line logparser.Line, config *DebugConfig) error {
+	lineText := string(line.Bytes)
 	if config.ShowRaw {
-		fmt.Printf("Raw: %q\n", line)
+		fmt.Printf("Raw: %q\n", lineText)
 	}
 
 	if config.ShowHex {
-		showHexDump(line)
+		showHexDump(lineText)
 	}
 
 	if config.ShowParsed {
-		entry, err := parser.ParseLine(line)
+		entry, err := parser.ParseLineBytes(line.Bytes, line)
 		if err != nil {
 			return err
 		}
@@ -347,4 +365,22 @@ func showParseDebug(parser *buildkitelogs.Parser, line string, config *DebugConf
 	}
 
 	return nil
+}
+
+func printParseError(err error) {
+	var parseErr *logparser.ParseError
+	if errors.As(err, &parseErr) {
+		fmt.Printf("Parse error: %s\n", parseErr.Kind)
+		fmt.Printf("  Line: %d\n", parseErr.Line)
+		fmt.Printf("  Stream offset: %d\n", parseErr.StreamOffset)
+		fmt.Printf("  Line offset: %d\n", parseErr.LineOffset)
+		fmt.Printf("  Before: %q\n", string(parseErr.Before))
+		fmt.Printf("  After: %q\n", string(parseErr.After))
+		if parseErr.Err != nil {
+			fmt.Printf("  Cause: %v\n", parseErr.Err)
+		}
+		return
+	}
+
+	fmt.Printf("Parse error: %v\n", err)
 }

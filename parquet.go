@@ -12,6 +12,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 func createNewFileWriter(schema *arrow.Schema, w io.Writer, pool memory.Allocator) (*pqarrow.FileWriter, error) {
@@ -42,7 +43,7 @@ func createArrowSchema() *arrow.Schema {
 }
 
 // createRecord creates an Arrow record from log entries using the writer's builders
-func (pw *ParquetWriter) createRecord(entries []*LogEntry) arrow.RecordBatch {
+func (pw *ParquetWriter) createRecord(entries []*logparser.Entry) arrow.RecordBatch {
 	numEntries := len(entries)
 	pw.timestampBuilder.Resize(numEntries)
 	pw.contentBuilder.Resize(numEntries)
@@ -121,7 +122,7 @@ func newParquetWriterWithPool(w io.Writer, pool memory.Allocator) (*ParquetWrite
 }
 
 // WriteBatch writes a batch of log entries to the Parquet file
-func (pw *ParquetWriter) WriteBatch(entries []*LogEntry) error {
+func (pw *ParquetWriter) WriteBatch(entries []*logparser.Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -144,19 +145,19 @@ func (pw *ParquetWriter) Close() error {
 }
 
 // ExportSeq2ToParquet exports log entries using Go 1.23+ iter.Seq2 for efficient iteration
-func ExportSeq2ToParquet(seq iter.Seq2[*LogEntry, error], filename string) error {
+func ExportSeq2ToParquet(seq iter.Seq2[*logparser.Entry, error], filename string) error {
 	_, err := ExportSeq2ToParquetWithFilterAndStats(seq, filename, nil)
 	return err
 }
 
 // ExportSeq2ToParquetWithFilter exports filtered log entries using iter.Seq2
-func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*LogEntry, error], filename string, filterFunc func(*LogEntry) bool) error {
+func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*logparser.Entry, error], filename string, filterFunc func(*logparser.Entry) bool) error {
 	_, err := ExportSeq2ToParquetWithFilterAndStats(seq, filename, filterFunc)
 	return err
 }
 
 // ExportSeq2ToParquetWithFilterAndStats exports filtered log entries and returns the number of rows written.
-func ExportSeq2ToParquetWithFilterAndStats(seq iter.Seq2[*LogEntry, error], filename string, filterFunc func(*LogEntry) bool) (int, error) {
+func ExportSeq2ToParquetWithFilterAndStats(seq iter.Seq2[*logparser.Entry, error], filename string, filterFunc func(*logparser.Entry) bool) (int, error) {
 	file, err := os.Create(filename) //nolint:gosec // caller-controlled path
 	if err != nil {
 		return 0, err
@@ -167,12 +168,12 @@ func ExportSeq2ToParquetWithFilterAndStats(seq iter.Seq2[*LogEntry, error], file
 }
 
 // ExportSeq2ToParquetWriter exports log entries to any io.Writer.
-func ExportSeq2ToParquetWriter(seq iter.Seq2[*LogEntry, error], w io.Writer) (int, error) {
+func ExportSeq2ToParquetWriter(seq iter.Seq2[*logparser.Entry, error], w io.Writer) (int, error) {
 	return ExportSeq2ToParquetWriterWithFilter(seq, w, nil)
 }
 
 // ExportSeq2ToParquetWriterWithFilter exports filtered log entries to any io.Writer.
-func ExportSeq2ToParquetWriterWithFilter(seq iter.Seq2[*LogEntry, error], w io.Writer, filterFunc func(*LogEntry) bool) (int, error) {
+func ExportSeq2ToParquetWriterWithFilter(seq iter.Seq2[*logparser.Entry, error], w io.Writer, filterFunc func(*logparser.Entry) bool) (int, error) {
 	writer, err := NewParquetWriterForWriter(w)
 	if err != nil {
 		return 0, err
@@ -180,7 +181,7 @@ func ExportSeq2ToParquetWriterWithFilter(seq iter.Seq2[*LogEntry, error], w io.W
 	defer func() { _ = writer.Close() }()
 
 	const batchSize = 1000
-	batch := make([]*LogEntry, 0, batchSize)
+	batch := make([]*logparser.Entry, 0, batchSize)
 	rows := 0
 
 	for entry, err := range seq {

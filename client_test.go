@@ -13,6 +13,13 @@ import (
 	"github.com/buildkite/go-buildkite/v5"
 )
 
+func TestDefaultClientParserOptionsTruncateLongLines(t *testing.T) {
+	options := defaultClientParserOptions()
+	if !options.TruncateLongLines {
+		t.Fatal("client parser options should truncate long lines to avoid aborting ingestion")
+	}
+}
+
 // mockBuildkiteAPI implements BuildkiteAPI for testing with call tracking
 type mockBuildkiteAPI struct {
 	logContent     string

@@ -15,55 +15,16 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
+	"github.com/buildkite/buildkite-logs/logparser"
 )
-
-type LogFlag int32
-
-const (
-	HasTimestamp LogFlag = iota
-	IsGroup
-)
-
-// LogFlags represents a bitwise combination of log flags
-type LogFlags int32
-
-// Has returns true if the specified flag is set
-func (lf LogFlags) Has(flag LogFlag) bool {
-	return lf&(1<<flag) != 0
-}
-
-// Set sets the specified flag
-func (lf *LogFlags) Set(flag LogFlag) {
-	*lf |= (1 << flag)
-}
-
-// Clear clears the specified flag
-func (lf *LogFlags) Clear(flag LogFlag) {
-	*lf &^= (1 << flag)
-}
-
-// Toggle toggles the specified flag
-func (lf *LogFlags) Toggle(flag LogFlag) {
-	*lf ^= (1 << flag)
-}
-
-// HasTimestamp returns true if HasTimestamp flag is set
-func (lf LogFlags) HasTimestamp() bool {
-	return lf.Has(HasTimestamp)
-}
-
-// IsGroup returns true if IsGroup flag is set
-func (lf LogFlags) IsGroup() bool {
-	return lf.Has(IsGroup)
-}
 
 // ParquetLogEntry represents a log entry read from a Parquet file
 type ParquetLogEntry struct {
-	RowNumber int64    `json:"row_number"` // 0-based row position in the Parquet file
-	Timestamp int64    `json:"timestamp"`
-	Content   string   `json:"content"`
-	Group     string   `json:"group"`
-	Flags     LogFlags `json:"flags"`
+	RowNumber int64              `json:"row_number"` // 0-based row position in the Parquet file
+	Timestamp int64              `json:"timestamp"`
+	Content   string             `json:"content"`
+	Group     string             `json:"group"`
+	Flags     logparser.LogFlags `json:"flags"`
 }
 
 // HasTime returns true if the entry has a timestamp (backward compatibility)
@@ -410,7 +371,7 @@ func convertRecordToEntriesIterStreaming(record arrow.RecordBatch, mapping *colu
 			// Flags field (optional)
 			if flagsCol != nil && !flagsCol.IsNull(i) {
 				if intCol, ok := flagsCol.(*array.Int32); ok {
-					entry.Flags = LogFlags(intCol.Value(i))
+					entry.Flags = logparser.LogFlags(intCol.Value(i))
 				}
 			}
 

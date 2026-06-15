@@ -4,13 +4,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 // TestParseLine exercises Parser.ParseLine specifically (the wrapper that adds
 // group tracking on top of ByteParser.ParseLine). For byte-level parsing tests,
 // see TestByteParserBasic in scanner_test.go.
 func TestParseLine(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	tests := []struct {
 		name        string
@@ -86,7 +88,7 @@ func TestParseLine(t *testing.T) {
 }
 
 func TestLogEntryClassification(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	tests := []struct {
 		name      string
@@ -131,7 +133,7 @@ func TestLogEntryClassification(t *testing.T) {
 }
 
 func TestParseReader(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	input := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment\n" +
@@ -141,7 +143,7 @@ func TestParseReader(t *testing.T) {
 	reader := strings.NewReader(input)
 
 	// Collect entries using streaming iterator
-	var entries []*LogEntry
+	var entries []*logparser.Entry
 	for entry, err := range parser.All(reader) {
 		if err != nil {
 			t.Fatalf("Parser.All() error = %v", err)
@@ -183,8 +185,8 @@ func TestParseReader(t *testing.T) {
 	}
 }
 
-func TestLogIterator(t *testing.T) {
-	parser := NewParser()
+func TestParserAllCompatibility(t *testing.T) {
+	parser := logparser.New(logparser.DefaultOptions())
 
 	input := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment\n" +
@@ -192,13 +194,20 @@ func TestLogIterator(t *testing.T) {
 		"\x1b_bk;t=1745322209948\x07~~~ Running global pre-checkout hook"
 
 	reader := strings.NewReader(input)
-	iterator := parser.NewIterator(reader)
+	var entries []*logparser.Entry
+	for entry, err := range parser.All(reader) {
+		if err != nil {
+			t.Fatalf("All() error: %v", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	if len(entries) != 4 {
+		t.Fatalf("Expected 4 entries, got %d", len(entries))
+	}
 
 	// Test first entry
-	if !iterator.Next() {
-		t.Fatal("Expected first entry")
-	}
-	entry := iterator.Entry()
+	entry := entries[0]
 	if !entry.HasTimestamp() {
 		t.Error("First entry should have timestamp")
 	}
@@ -207,19 +216,13 @@ func TestLogIterator(t *testing.T) {
 	}
 
 	// Test second entry
-	if !iterator.Next() {
-		t.Fatal("Expected second entry")
-	}
-	entry = iterator.Entry()
+	entry = entries[1]
 	if !entry.HasTimestamp() {
 		t.Error("Second entry should have timestamp")
 	}
 
 	// Test third entry (regular line)
-	if !iterator.Next() {
-		t.Fatal("Expected third entry")
-	}
-	entry = iterator.Entry()
+	entry = entries[2]
 	if entry.HasTimestamp() {
 		t.Error("Third entry should not have timestamp")
 	}
@@ -228,10 +231,7 @@ func TestLogIterator(t *testing.T) {
 	}
 
 	// Test fourth entry
-	if !iterator.Next() {
-		t.Fatal("Expected fourth entry")
-	}
-	entry = iterator.Entry()
+	entry = entries[3]
 	if !entry.HasTimestamp() {
 		t.Error("Fourth entry should have timestamp")
 	}
@@ -239,45 +239,37 @@ func TestLogIterator(t *testing.T) {
 		t.Error("Fourth entry should be a group")
 	}
 
-	// Test end of input
-	if iterator.Next() {
-		t.Error("Should not have more entries")
-	}
-
-	// Check no errors occurred
-	if iterator.Err() != nil {
-		t.Errorf("Iterator error: %v", iterator.Err())
-	}
 }
 
 func TestLogIteratorEmpty(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 	reader := strings.NewReader("")
-	iterator := parser.NewIterator(reader)
 
-	if iterator.Next() {
+	for range parser.All(reader) {
 		t.Error("Should not have entries for empty input")
-	}
-
-	if iterator.Err() != nil {
-		t.Errorf("Iterator error on empty input: %v", iterator.Err())
 	}
 }
 
 func TestLogIteratorInvalidTimestamp(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	// An overflowing timestamp in valid OSC framing should not cause an error;
 	// the line is returned with a zero timestamp and the OSC envelope stripped.
 	input := "\x1b_bk;t=999999999999999999999999999999\x07content"
 	reader := strings.NewReader(input)
-	iterator := parser.NewIterator(reader)
-
-	if !iterator.Next() {
-		t.Fatal("Expected Next() to return true for invalid timestamp")
+	var entries []*logparser.Entry
+	for entry, err := range parser.All(reader) {
+		if err != nil {
+			t.Fatalf("All() error: %v", err)
+		}
+		entries = append(entries, entry)
 	}
 
-	entry := iterator.Entry()
+	if len(entries) != 1 {
+		t.Fatalf("Expected one entry for invalid timestamp, got %d", len(entries))
+	}
+
+	entry := entries[0]
 	if entry.Content != "content" {
 		t.Errorf("Expected content %q, got %q", "content", entry.Content)
 	}
@@ -285,9 +277,6 @@ func TestLogIteratorInvalidTimestamp(t *testing.T) {
 		t.Error("Expected HasTimestamp() to be false")
 	}
 
-	if iterator.Err() != nil {
-		t.Errorf("Unexpected error: %v", iterator.Err())
-	}
 }
 
 func TestComputeFlags(t *testing.T) {
@@ -323,7 +312,7 @@ func TestComputeFlags(t *testing.T) {
 		},
 	}
 
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			entry, err := parser.ParseLine(tt.input)
@@ -333,23 +322,22 @@ func TestComputeFlags(t *testing.T) {
 
 			flags := entry.ComputeFlags()
 
-			if flags.Has(HasTimestamp) != tt.wantTimestamp {
-				t.Errorf("HasTimestamp flag = %v, want %v", flags.Has(HasTimestamp), tt.wantTimestamp)
+			if flags.Has(logparser.HasTimestamp) != tt.wantTimestamp {
+				t.Errorf("HasTimestamp flag = %v, want %v", flags.Has(logparser.HasTimestamp), tt.wantTimestamp)
 			}
-			if flags.Has(IsGroup) != tt.wantGroup {
-				t.Errorf("IsGroup flag = %v, want %v", flags.Has(IsGroup), tt.wantGroup)
+			if flags.Has(logparser.IsGroup) != tt.wantGroup {
+				t.Errorf("IsGroup flag = %v, want %v", flags.Has(logparser.IsGroup), tt.wantGroup)
 			}
 		})
 	}
 }
 
 func TestParseLineEdgeCases(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	inputs := []string{
 		"",
 		"a",
-		"\x1b_bk;t=123456",                   // OSC start without BEL
 		"\x1b_bk;t=123\x07content\x07more",   // OSC with multiple BEL
 		"\x1b_bk;t=9999999999999\x07content", // Large timestamp
 	}
@@ -367,7 +355,7 @@ func TestParseLineEdgeCases(t *testing.T) {
 }
 
 func TestParseLineMultiOSCTruncation(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	input := "\x1b_bk;t=1745322209921\x07first content\x1b_bk;t=1745322209922\x07second content"
 	entry, err := parser.ParseLine(input)

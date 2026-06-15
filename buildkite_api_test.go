@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -200,5 +201,46 @@ func TestGetJobLog_NoToken(t *testing.T) {
 	// We just check that an error occurred
 	if err == nil {
 		t.Error("Expected an error when API token is empty")
+	}
+}
+
+func TestGetJobLog_StreamsPlainText(t *testing.T) {
+	const logContent = "\x1b_bk;t=1745322209921\x07first line\nsecond line\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/organizations/org/pipelines/pipeline/builds/123/jobs/job-1/log" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Accept"); got != "text/plain" {
+			t.Errorf("Accept = %q, want text/plain", got)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		if _, err := io.WriteString(w, logContent); err != nil {
+			t.Errorf("WriteString: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	bkClient, err := buildkite.NewOpts(
+		buildkite.WithBaseURL(server.URL),
+		buildkite.WithTokenAuth("test-token"),
+	)
+	if err != nil {
+		t.Fatalf("NewOpts: %v", err)
+	}
+
+	apiClient := NewBuildkiteAPIExistingClient(bkClient)
+	reader, err := apiClient.GetJobLog(t.Context(), "org", "pipeline", "123", "job-1")
+	if err != nil {
+		t.Fatalf("GetJobLog: %v", err)
+	}
+	defer reader.Close()
+
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != logContent {
+		t.Fatalf("log content = %q, want %q", string(got), logContent)
 	}
 }

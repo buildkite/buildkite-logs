@@ -31,7 +31,9 @@ type BuildkiteAPI interface {
 // BuildkiteAPIClient provides methods to interact with the Buildkite API
 // Now wraps the official go-buildkite v4 client
 type BuildkiteAPIClient struct {
-	client *buildkite.Client
+	client       *buildkite.Client
+	requireToken bool
+	apiToken     string
 }
 
 // NewBuildkiteAPIClient creates a new Buildkite API client using go-buildkite v4
@@ -49,7 +51,9 @@ func NewBuildkiteAPIClient(apiToken, version string) *BuildkiteAPIClient {
 	)
 
 	return &BuildkiteAPIClient{
-		client: client,
+		client:       client,
+		requireToken: true,
+		apiToken:     apiToken,
 	}
 }
 
@@ -66,13 +70,27 @@ func NewBuildkiteAPIExistingClient(client *buildkite.Client) *BuildkiteAPIClient
 // build: build number or UUID
 // job: job ID
 func (c *BuildkiteAPIClient) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
-	jobLog, _, err := c.client.Jobs.GetJobLog(ctx, org, pipeline, build, job)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get job log: %w", err)
+	if c.requireToken && c.apiToken == "" {
+		return nil, fmt.Errorf("missing Buildkite API token")
 	}
 
-	// Convert JobLog content to io.ReadCloser
-	return io.NopCloser(strings.NewReader(jobLog.Content)), nil
+	u := fmt.Sprintf("v2/organizations/%s/pipelines/%s/builds/%s/jobs/%s/log", org, pipeline, build, job)
+	req, err := c.client.NewRequest(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create job log request: %w", err)
+	}
+	req.Header.Set("Accept", "text/plain")
+
+	reader, writer := io.Pipe()
+	go func() {
+		_, err := c.client.Do(req, writer)
+		if err != nil {
+			err = &logDownloadError{err: err}
+		}
+		_ = writer.CloseWithError(err)
+	}()
+
+	return reader, nil
 }
 
 // GetJobStatus gets the current status of a job

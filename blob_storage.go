@@ -1,12 +1,14 @@
 package buildkitelogs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,10 @@ type BlobMetadata struct {
 	Organization string    `json:"organization"`
 	Pipeline     string    `json:"pipeline"`
 	Build        string    `json:"build"`
+	LogSize      int64     `json:"log_size_bytes,omitempty"`
+	ParquetSize  int64     `json:"parquet_size_bytes,omitempty"`
+	RowCount     int       `json:"row_count,omitempty"`
+	ProcessedAt  time.Time `json:"processed_at"`
 }
 
 // BlobStorageOptions contains configuration options for blob storage
@@ -175,6 +181,11 @@ func (bs *BlobStorage) Exists(ctx context.Context, key string) (bool, error) {
 
 // WriteWithMetadata writes data to blob storage with metadata
 func (bs *BlobStorage) WriteWithMetadata(ctx context.Context, key string, data []byte, metadata *BlobMetadata) error {
+	return bs.WriteWithMetadataFrom(ctx, key, bytes.NewReader(data), metadata)
+}
+
+// WriteWithMetadataFrom streams data to blob storage with metadata.
+func (bs *BlobStorage) WriteWithMetadataFrom(ctx context.Context, key string, r io.Reader, metadata *BlobMetadata) error {
 	opts := &blob.WriterOptions{}
 
 	if metadata != nil {
@@ -188,6 +199,18 @@ func (bs *BlobStorage) WriteWithMetadata(ctx context.Context, key string, data [
 			"pipeline":     metadata.Pipeline,
 			"build":        metadata.Build,
 		}
+		if metadata.LogSize > 0 {
+			opts.Metadata["log_size_bytes"] = fmt.Sprintf("%d", metadata.LogSize)
+		}
+		if metadata.ParquetSize > 0 {
+			opts.Metadata["parquet_size_bytes"] = fmt.Sprintf("%d", metadata.ParquetSize)
+		}
+		if metadata.RowCount > 0 {
+			opts.Metadata["row_count"] = fmt.Sprintf("%d", metadata.RowCount)
+		}
+		if !metadata.ProcessedAt.IsZero() {
+			opts.Metadata["processed_at"] = metadata.ProcessedAt.Format(time.RFC3339)
+		}
 	}
 
 	writer, err := bs.bucket.NewWriter(ctx, key, opts)
@@ -195,7 +218,7 @@ func (bs *BlobStorage) WriteWithMetadata(ctx context.Context, key string, data [
 		return fmt.Errorf("failed to create blob writer: %w", err)
 	}
 
-	if _, err := writer.Write(data); err != nil {
+	if _, err := io.Copy(writer, r); err != nil {
 		writer.Close()
 		return fmt.Errorf("failed to write blob data: %w", err)
 	}
@@ -230,6 +253,26 @@ func (bs *BlobStorage) ReadWithMetadata(ctx context.Context, key string) (*BlobM
 		if cachedAtStr := attrMap["cached_at"]; cachedAtStr != "" {
 			if cachedAt, err := time.Parse(time.RFC3339, cachedAtStr); err == nil {
 				metadata.CachedAt = cachedAt
+			}
+		}
+		if processedAtStr := attrMap["processed_at"]; processedAtStr != "" {
+			if processedAt, err := time.Parse(time.RFC3339, processedAtStr); err == nil {
+				metadata.ProcessedAt = processedAt
+			}
+		}
+		if logSizeStr := attrMap["log_size_bytes"]; logSizeStr != "" {
+			if logSize, err := strconv.ParseInt(logSizeStr, 10, 64); err == nil {
+				metadata.LogSize = logSize
+			}
+		}
+		if parquetSizeStr := attrMap["parquet_size_bytes"]; parquetSizeStr != "" {
+			if parquetSize, err := strconv.ParseInt(parquetSizeStr, 10, 64); err == nil {
+				metadata.ParquetSize = parquetSize
+			}
+		}
+		if rowCountStr := attrMap["row_count"]; rowCountStr != "" {
+			if rowCount, err := strconv.Atoi(rowCountStr); err == nil {
+				metadata.RowCount = rowCount
 			}
 		}
 	}

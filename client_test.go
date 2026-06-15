@@ -65,6 +65,12 @@ func (m *mockBuildkiteAPI) calls() (int, int) {
 	return m.getLogCalls, m.getStatusCalls
 }
 
+func (m *mockBuildkiteAPI) setJobStatus(status *JobStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobStatus = status
+}
+
 func newTerminalMock() *mockBuildkiteAPI {
 	return &mockBuildkiteAPI{
 		logContent: "\x1b_bk;t=1745322209921\x07Test log entry\n",
@@ -225,8 +231,79 @@ func TestClient_ConcurrentTTLExpiry_RefreshOnce(t *testing.T) {
 	if logCalls != 2 {
 		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
 	}
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	}
+}
+
+func TestClient_NonTerminalCacheHit_StatusMemoized(t *testing.T) {
+	mock := &mockBuildkiteAPI{
+		logContent: "\x1b_bk;t=1745322209921\x07running log entry\n",
+		jobStatus:  &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
+	}
+	client := newTestClient(t, mock)
+
+	reader1, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("first NewReader: %v", err)
+	}
+	defer reader1.Close()
+
+	reader2, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("second NewReader: %v", err)
+	}
+	defer reader2.Close()
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 1 {
+		t.Fatalf("GetJobLog calls = %d, want 1", logCalls)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	}
+}
+
+func TestClient_NonTerminalCacheHit_RefreshesWhenStatusBecomesTerminal(t *testing.T) {
+	mock := &mockBuildkiteAPI{
+		logContent: "\x1b_bk;t=1745322209921\x07running log entry\n",
+		jobStatus:  &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
+	}
+	client := newTestClient(t, mock)
+	blobKey := GenerateBlobKey("org", "pipeline", "123", "job-1")
+
+	reader1, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("first NewReader: %v", err)
+	}
+	defer reader1.Close()
+
+	mock.setJobStatus(&JobStatus{ID: "test-job", State: JobStatePassed, IsTerminal: true})
+	client.statusCache.Store(blobKey, statusCacheEntry{
+		status:    &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
+		fetchedAt: time.Now().Add(-defaultStatusCacheTTL - time.Second),
+	})
+
+	reader2, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("second NewReader: %v", err)
+	}
+	defer reader2.Close()
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 2 {
+		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
+	}
 	if statusCalls != 2 {
 		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+
+	metadata, err := client.blobStorage.ReadWithMetadata(t.Context(), blobKey)
+	if err != nil {
+		t.Fatalf("ReadWithMetadata: %v", err)
+	}
+	if !metadata.IsTerminal {
+		t.Fatal("expected final refresh to persist terminal metadata")
 	}
 }
 
@@ -266,8 +343,8 @@ func TestClient_ConcurrentForceRefresh_Coalesces(t *testing.T) {
 	if logCalls != 2 {
 		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
 	}
-	if statusCalls != 2 {
-		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
 	}
 }
 
@@ -313,8 +390,8 @@ func TestClient_ConcurrentForceAndTTLRefresh_Coalesce(t *testing.T) {
 	if logCalls != 2 {
 		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
 	}
-	if statusCalls != 2 {
-		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
 	}
 }
 

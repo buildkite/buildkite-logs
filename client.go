@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/buildkite/go-buildkite/v5"
@@ -17,6 +18,8 @@ var ErrLogTooLarge = errors.New("log exceeds maximum allowed size")
 
 // DefaultMaxLogBytes is the default maximum log size (10MB).
 const DefaultMaxLogBytes int64 = 10 * 1024 * 1024
+
+const defaultStatusCacheTTL = 5 * time.Second
 
 // ClientOption configures a Client.
 type ClientOption func(*Client)
@@ -144,6 +147,13 @@ type Client struct {
 	hooks        *Hooks
 	maxLogBytes  int64 // 0 means no limit
 	refreshGroup singleflight.Group
+	statusGroup  singleflight.Group
+	statusCache  sync.Map // map[string]statusCacheEntry
+}
+
+type statusCacheEntry struct {
+	status    *JobStatus
+	fetchedAt time.Time
 }
 
 // NewClient creates a new Client using the provided go-buildkite client
@@ -253,7 +263,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 	}
 
 	if exists && !forceRefresh {
-		if usable, err := c.cacheUsable(ctx, blobKey, ttl); err == nil && usable {
+		if usable, err := c.cacheUsable(ctx, api, org, pipeline, build, job, blobKey, ttl); err == nil && usable {
 			return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
 		}
 	}
@@ -264,7 +274,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 	inflightKey := blobKey
 	ch := c.refreshGroup.DoChan(inflightKey, func() (any, error) {
 		if !forceRefresh {
-			if usable, err := c.cacheUsable(refreshCtx, blobKey, ttl); err == nil && usable {
+			if usable, err := c.cacheUsable(refreshCtx, api, org, pipeline, build, job, blobKey, ttl); err == nil && usable {
 				return nil, nil
 			}
 		}
@@ -283,7 +293,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 	return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
 }
 
-func (c *Client) cacheUsable(ctx context.Context, blobKey string, ttl time.Duration) (bool, error) {
+func (c *Client) cacheUsable(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job, blobKey string, ttl time.Duration) (bool, error) {
 	metadata, err := c.blobStorage.ReadWithMetadata(ctx, blobKey)
 	if err != nil || metadata == nil {
 		return false, err
@@ -292,14 +302,67 @@ func (c *Client) cacheUsable(ctx context.Context, blobKey string, ttl time.Durat
 		return true, nil
 	}
 
+	status, err := c.getJobStatusMemoized(ctx, api, org, pipeline, build, job, blobKey)
+	if err != nil {
+		return false, err
+	}
+	if status.IsTerminal {
+		return false, nil
+	}
+
 	return time.Since(metadata.CachedAt) <= ttl, nil
 }
 
+func (c *Client) getJobStatusMemoized(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job, blobKey string) (*JobStatus, error) {
+	if entry, ok := c.loadCachedJobStatus(blobKey); ok {
+		return entry.status, nil
+	}
+
+	result, err, _ := c.statusGroup.Do(blobKey, func() (any, error) {
+		if entry, ok := c.loadCachedJobStatus(blobKey); ok {
+			return entry.status, nil
+		}
+
+		jobStatusStart := time.Now()
+		jobStatus, err := api.GetJobStatus(ctx, org, pipeline, build, job)
+		jobStatusDuration := time.Since(jobStatusStart)
+		c.fireJobStatusHook(ctx, org, pipeline, build, job, jobStatusDuration, jobStatus, err)
+		if err != nil {
+			return nil, err
+		}
+
+		c.statusCache.Store(blobKey, statusCacheEntry{
+			status:    jobStatus,
+			fetchedAt: time.Now(),
+		})
+		return jobStatus, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	status, ok := result.(*JobStatus)
+	if !ok || status == nil {
+		return nil, fmt.Errorf("memoized job status had unexpected type %T", result)
+	}
+	return status, nil
+}
+
+func (c *Client) loadCachedJobStatus(blobKey string) (statusCacheEntry, bool) {
+	value, ok := c.statusCache.Load(blobKey)
+	if !ok {
+		return statusCacheEntry{}, false
+	}
+	entry, ok := value.(statusCacheEntry)
+	if !ok || time.Since(entry.fetchedAt) > defaultStatusCacheTTL {
+		c.statusCache.Delete(blobKey)
+		return statusCacheEntry{}, false
+	}
+	return entry, true
+}
+
 func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string, ttl time.Duration, blobKey string) error {
-	jobStatusStart := time.Now()
-	jobStatus, err := api.GetJobStatus(ctx, org, pipeline, build, job)
-	jobStatusDuration := time.Since(jobStatusStart)
-	c.fireJobStatusHook(ctx, org, pipeline, build, job, jobStatusDuration, jobStatus, err)
+	jobStatus, err := c.getJobStatusMemoized(ctx, api, org, pipeline, build, job, blobKey)
 	if err != nil {
 		return fmt.Errorf("failed to get job status: %w", err)
 	}

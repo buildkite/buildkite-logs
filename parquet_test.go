@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 func TestParquetWriter(t *testing.T) {
@@ -22,7 +24,7 @@ func TestParquetWriter(t *testing.T) {
 		t.Fatalf("Failed to create writer: %v", err)
 	}
 
-	entries := []*LogEntry{
+	entries := []*logparser.Entry{
 		{
 			Timestamp: time.Unix(0, 1745322209921*int64(time.Millisecond)),
 			Content:   "test content",
@@ -85,9 +87,9 @@ func TestParquetWriterMultipleBatches(t *testing.T) {
 	baseTime := time.Date(2025, 4, 22, 21, 43, 29, 0, time.UTC)
 
 	for batch := 0; batch < 3; batch++ {
-		entries := make([]*LogEntry, 5)
+		entries := make([]*logparser.Entry, 5)
 		for i := range entries {
-			entries[i] = &LogEntry{
+			entries[i] = &logparser.Entry{
 				Timestamp: baseTime.Add(time.Duration(batch*5+i) * time.Millisecond),
 				Content:   "line",
 				Group:     "group",
@@ -120,7 +122,7 @@ func TestParquetRoundtrip(t *testing.T) {
 	testFile := filepath.Join(t.TempDir(), "test_roundtrip.parquet")
 
 	baseTime := time.Date(2025, 4, 22, 21, 43, 29, 0, time.UTC)
-	entries := []*LogEntry{
+	entries := []*logparser.Entry{
 		{Timestamp: baseTime, Content: "~~~ Setup group", RawLine: []byte("~~~ Setup group"), Group: "setup"},
 		{Timestamp: baseTime.Add(100 * time.Millisecond), Content: "second line", RawLine: []byte("second line"), Group: "test"},
 		{Timestamp: baseTime.Add(200 * time.Millisecond), Content: "third line", RawLine: []byte("third line"), Group: "cleanup"},
@@ -190,9 +192,9 @@ func TestParquetRoundtripRowNumbers(t *testing.T) {
 	testFile := filepath.Join(t.TempDir(), "test_rows.parquet")
 
 	baseTime := time.Date(2025, 4, 22, 21, 43, 29, 0, time.UTC)
-	entries := make([]*LogEntry, 10)
+	entries := make([]*logparser.Entry, 10)
 	for i := range entries {
-		entries[i] = &LogEntry{
+		entries[i] = &logparser.Entry{
 			Timestamp: baseTime.Add(time.Duration(i) * time.Millisecond),
 			Content:   "line",
 			Group:     "g",
@@ -231,7 +233,7 @@ func TestParquetRoundtripRowNumbers(t *testing.T) {
 }
 
 func TestParquetSeq2Export(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +
@@ -263,7 +265,7 @@ func TestParquetSeq2Export(t *testing.T) {
 }
 
 func TestParquetSeq2ExportWriter(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 	testData := "\x1b_bk;t=1745322209921\x07first line\n" +
 		"\x1b_bk;t=1745322209922\x07second line"
 
@@ -281,7 +283,7 @@ func TestParquetSeq2ExportWriter(t *testing.T) {
 }
 
 func TestParquetSeq2ExportWithFilter(t *testing.T) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +
@@ -290,7 +292,7 @@ func TestParquetSeq2ExportWithFilter(t *testing.T) {
 
 	filename := filepath.Join(t.TempDir(), "test_seq2_filtered.parquet")
 
-	filterFunc := func(entry *LogEntry) bool {
+	filterFunc := func(entry *logparser.Entry) bool {
 		return strings.Contains(entry.Content, "$")
 	}
 

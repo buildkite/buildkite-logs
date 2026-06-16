@@ -5,21 +5,23 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 func TestDictionaryEncodingAcrossBatches(t *testing.T) {
 	// Create test data with repeated strings across batches
-	entry1 := &LogEntry{
+	entry1 := &logparser.Entry{
 		Timestamp: time.Now(),
 		Content:   "repeated content",
 		Group:     "common group",
 	}
-	entry2 := &LogEntry{
+	entry2 := &logparser.Entry{
 		Timestamp: time.Now(),
 		Content:   "different content",
 		Group:     "common group", // This will be repeated
 	}
-	entry3 := &LogEntry{
+	entry3 := &logparser.Entry{
 		Timestamp: time.Now(),
 		Content:   "repeated content", // This will be repeated from batch 1
 		Group:     "another group",
@@ -39,13 +41,13 @@ func TestDictionaryEncodingAcrossBatches(t *testing.T) {
 	}
 
 	// Write first batch
-	batch1 := []*LogEntry{entry1, entry2}
+	batch1 := []*logparser.Entry{entry1, entry2}
 	if err := writer.WriteBatch(batch1); err != nil {
 		t.Fatalf("Failed to write batch 1: %v", err)
 	}
 
 	// Write second batch with some repeated strings
-	batch2 := []*LogEntry{entry3}
+	batch2 := []*logparser.Entry{entry3}
 	if err := writer.WriteBatch(batch2); err != nil {
 		t.Fatalf("Failed to write batch 2: %v", err)
 	}

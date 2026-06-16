@@ -34,6 +34,7 @@ The library automatically downloads logs from the Buildkite API, caches them loc
 - **Buildkite API Integration**: Direct fetching from Buildkite jobs via REST API with authentication
 - **Parquet Storage**: Efficient columnar storage for fast analytics and data processing using [Apache Arrow](https://arrow.apache.org/).
 - **Streaming Processing**: Memory-efficient processing of logs of any size using Go iterators
+- **Robust Ingestion**: Malformed Buildkite OSC lines are preserved as plain log content, and the high-level client truncates overlong individual lines instead of aborting cache refreshes
 - **Observability Hooks**: Optional hooks for tracing and logging without framework coupling
 
 ### Log Processing Engine
@@ -500,7 +501,6 @@ Timestamp: 2025-07-01 09:20:41.629 +1000 AEST (Unix: 1751321141)
 Content: "remote: Counting objects:   0% (1/287)K_bk;t=1751321141629remote: Counting objects:   1% (3/287)K..."
 Group: ""
 RawLine length: 6619
-IsCommand: false
 IsGroup: false
 ```
 
@@ -680,6 +680,8 @@ Output:
 - `-groups`: Show group/section information for each entry
 - `-parquet <path>`: Export to Parquet file (e.g., output.parquet)
 - `-jsonl <path>`: Export to JSON Lines file (e.g., output.jsonl)
+- `-max-line-bytes <bytes>`: Maximum bytes allowed in a single log line (default: 8388608)
+- `-truncate-long-lines`: Truncate lines that exceed `-max-line-bytes` instead of returning an error
 
 #### Query Command
 ```bash
@@ -743,6 +745,8 @@ Output:
 - `-hex`: Show hex dump of each line (default: false)
 - `-parsed`: Show parsed log entry (default: true)
 - `-csv <path>`: Output CSV file for extract-timestamps mode
+- `-max-line-bytes <bytes>`: Maximum bytes allowed in a single log line (default: 8388608)
+- `-truncate-long-lines`: Truncate lines that exceed `-max-line-bytes` instead of returning an error
 
 **Note:** For API usage, set `BUILDKITE_API_TOKEN` environment variable. Logs are automatically downloaded and cached in `~/.bklog/`.
 
@@ -843,7 +847,7 @@ The exported Parquet files contain the following columns:
 | `timestamp` | int64 | Unix timestamp in milliseconds since epoch |
 | `content` | string | Log content after OSC sequence processing |
 | `group` | string | Current build group/section name |
-| `flags` | int32 | Bitwise flags field (HasTimestamp=1, IsCommand=2, IsGroup=4) |
+| `flags` | int32 | Bitwise flags field (HasTimestamp=1, IsGroup=2) |
 
 ### Flags Field
 
@@ -852,8 +856,7 @@ The `flags` column uses bitwise operations to efficiently store multiple boolean
 | Flag | Bit Position | Value | Description |
 |------|-------------|--------|-------------|
 | `HasTimestamp` | 0 | 1 | Entry has a valid timestamp |
-| `IsCommand` | 1 | 2 | Entry is a shell command |
-| `IsGroup` | 2 | 4 | Entry is a group header |
+| `IsGroup` | 1 | 2 | Entry is a group header |
 
 ### Usage Examples
 
@@ -871,7 +874,7 @@ The `flags` column uses bitwise operations to efficiently store multiple boolean
 ```bash
 ./build/bklog -file buildkite.log -parquet output.parquet -summary
 ```
-This uses the modern `iter.Seq2[*LogEntry, error]` iterator pattern for memory-efficient processing.
+This uses the public `github.com/buildkite/buildkite-logs/logparser` streaming iterator for memory-efficient processing.
 
 
 
@@ -880,58 +883,46 @@ This uses the modern `iter.Seq2[*LogEntry, error]` iterator pattern for memory-e
 ### Types
 
 ```go
-type LogEntry struct {
+type logparser.Entry struct {
     Timestamp time.Time  // Parsed timestamp (zero if no timestamp)
     Content   string     // Log content after OSC sequence
-    RawLine   []byte     // Original raw log line as bytes
+    RawLine   []byte     // Parsed line bytes; truncated lines include the suffix
     Group     string     // Current section/group this entry belongs to
-}
-
-type Parser struct {
-    // Internal regex patterns
 }
 ```
 
 ### Methods
 
-#### Parser Methods
+#### Parser Package
 ```go
-// Create a new parser
-func NewParser() *Parser
+import "github.com/buildkite/buildkite-logs/logparser"
 
-// Parse a single log line
-func (p *Parser) ParseLine(line string) (*LogEntry, error)
-
-// Create iter.Seq2 iterator with proper error handling (streaming approach)
-func (p *Parser) All(reader io.Reader) iter.Seq2[*LogEntry, error]
-
-// Strip ANSI escape sequences
-func (p *Parser) StripANSI(content string) string
+parser := logparser.New(logparser.DefaultOptions())
+for entry, err := range parser.All(reader) {
+    // entry is a *logparser.Entry
+}
 ```
 
-
-#### LogEntry Methods
+#### Parser Entry Methods
 ```go
-func (entry *LogEntry) HasTimestamp() bool
-func (entry *LogEntry) CleanContent() string  // Content with ANSI stripped
-func (entry *LogEntry) IsCommand() bool
-func (entry *LogEntry) IsGroup() bool         // Check if entry is a group header (~~~, ---, +++)
-func (entry *LogEntry) IsSection() bool       // Deprecated: use IsGroup() instead
+func (entry *logparser.Entry) HasTimestamp() bool
+func (entry *logparser.Entry) IsGroup() bool         // Check if entry is a group header (~~~, ---, +++)
+func (entry *logparser.Entry) IsSection() bool       // Alias for IsGroup()
 ```
 
 #### Parquet Export Functions
 ```go
 // Export using iter.Seq2 streaming iterator
-func ExportSeq2ToParquet(seq iter.Seq2[*LogEntry, error], filename string) error
+func ExportSeq2ToParquet(seq iter.Seq2[*logparser.Entry, error], filename string) error
 
 // Export using iter.Seq2 with filtering
-func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*LogEntry, error], filename string, filterFunc func(*LogEntry) bool) error
+func ExportSeq2ToParquetWithFilter(seq iter.Seq2[*logparser.Entry, error], filename string, filterFunc func(*logparser.Entry) bool) error
 
 // Create a new Parquet writer for streaming
 func NewParquetWriter(file *os.File) *ParquetWriter
 
 // Write a batch of entries to Parquet
-func (pw *ParquetWriter) WriteBatch(entries []*LogEntry) error
+func (pw *ParquetWriter) WriteBatch(entries []*logparser.Entry) error
 
 // Close the Parquet writer
 func (pw *ParquetWriter) Close() error
@@ -964,26 +955,22 @@ type ParquetLogEntry struct {
     Timestamp   int64    `json:"timestamp"`    // Unix timestamp in milliseconds
     Content     string   `json:"content"`      // Log content
     Group       string   `json:"group"`        // Associated group/section
-    Flags       LogFlags `json:"flags"`        // Bitwise flags (HasTimestamp=1, IsCommand=2, IsGroup=4)
+    Flags       logparser.LogFlags `json:"flags"` // Bitwise flags (HasTimestamp=1, IsGroup=2)
 }
 
 // Backward-compatible methods
 func (entry *ParquetLogEntry) HasTime() bool      // Returns Flags.HasTimestamp()
-func (entry *ParquetLogEntry) IsCommand() bool    // Returns Flags.IsCommand()
 func (entry *ParquetLogEntry) IsGroup() bool      // Returns Flags.IsGroup()
 
-type LogFlags int32
-
 // Bitwise flag operations
-func (lf LogFlags) Has(flag LogFlag) bool         // Check if flag is set
-func (lf *LogFlags) Set(flag LogFlag)             // Set flag
-func (lf *LogFlags) Clear(flag LogFlag)           // Clear flag
-func (lf *LogFlags) Toggle(flag LogFlag)          // Toggle flag
+func (lf logparser.LogFlags) Has(flag logparser.LogFlag) bool         // Check if flag is set
+func (lf *logparser.LogFlags) Set(flag logparser.LogFlag)             // Set flag
+func (lf *logparser.LogFlags) Clear(flag logparser.LogFlag)           // Clear flag
+func (lf *logparser.LogFlags) Toggle(flag logparser.LogFlag)          // Toggle flag
 
 // Convenience methods
-func (lf LogFlags) HasTimestamp() bool            // Check HasTimestamp flag
-func (lf LogFlags) IsCommand() bool               // Check IsCommand flag  
-func (lf LogFlags) IsGroup() bool                 // Check IsGroup flag
+func (lf logparser.LogFlags) HasTimestamp() bool            // Check HasTimestamp flag
+func (lf logparser.LogFlags) IsGroup() bool                 // Check IsGroup flag
 
 type GroupInfo struct {
     Name       string    `json:"name"`          // Group/section name
@@ -1030,10 +1017,7 @@ go test -bench=. -benchmem
 - **Seq2 streaming export**: ~1,100 ops/sec, 1.2 MB allocated
 
 **Content Classification Performance (1,000 entries):**
-- **IsCommand()**: ~15,000 ops/sec, 84 KB allocated
 - **IsGroup()**: ~14,000 ops/sec, 84 KB allocated
-
-- **CleanContent()**: ~15,000 ops/sec, 84 KB allocated
 
 **Parquet Streaming Query Performance (Apache Arrow Go v18):**
 - **ReadEntriesIter**: Constant memory usage, ~5,700 entries/sec

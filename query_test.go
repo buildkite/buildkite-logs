@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 func TestParquetReader(t *testing.T) {
@@ -169,7 +171,7 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 			Timestamp: baseTime,
 			Content:   "~~~ Running tests",
 			Group:     "~~~ Running tests",
-			Flags:     LogFlags(1 << IsGroup),
+			Flags:     logparser.LogFlags(1 << logparser.IsGroup),
 		},
 		{
 			Timestamp: baseTime + 100,
@@ -181,7 +183,7 @@ func TestStreamingGroupAnalysis(t *testing.T) {
 			Timestamp: baseTime + 1000,
 			Content:   "--- Build complete",
 			Group:     "--- Build complete",
-			Flags:     LogFlags(1 << IsGroup),
+			Flags:     logparser.LogFlags(1 << logparser.IsGroup),
 		},
 	}
 
@@ -588,10 +590,10 @@ func writeTestParquetFile(filename string, entries []ParquetLogEntry) error {
 	}
 	defer writer.Close()
 
-	// Convert ParquetLogEntry to LogEntry format for writing
-	logEntries := make([]*LogEntry, len(entries))
+	// Convert ParquetLogEntry to parser entry format for writing
+	logEntries := make([]*logparser.Entry, len(entries))
 	for i, entry := range entries {
-		logEntries[i] = &LogEntry{
+		logEntries[i] = &logparser.Entry{
 			Timestamp: time.Unix(0, entry.Timestamp*int64(time.Millisecond)),
 			Content:   entry.Content,
 			RawLine:   []byte(entry.Content),

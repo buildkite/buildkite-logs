@@ -10,13 +10,15 @@ import (
 var version = "dev"
 
 type Config struct {
-	FilePath    string
-	OutputJSON  bool
-	Filter      string
-	ShowSummary bool
-	ShowGroups  bool
-	ParquetFile string
-	JSONLFile   string
+	FilePath          string
+	OutputJSON        bool
+	Filter            string
+	ShowSummary       bool
+	ShowGroups        bool
+	ParquetFile       string
+	JSONLFile         string
+	MaxLineBytes      int
+	TruncateLongLines bool
 	// Buildkite API parameters
 	Organization string
 	Pipeline     string

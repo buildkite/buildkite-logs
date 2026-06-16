@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 // TestParquetWriter_ArrowMemoryReleased verifies that all Arrow-allocated memory is
@@ -184,11 +185,11 @@ func snapshotBklogFiles(t *testing.T) map[string]bool {
 	return result
 }
 
-func makeTestEntries(n int) []*LogEntry {
+func makeTestEntries(n int) []*logparser.Entry {
 	base := time.Date(2025, 4, 22, 12, 0, 0, 0, time.UTC)
-	entries := make([]*LogEntry, n)
+	entries := make([]*logparser.Entry, n)
 	for i := range entries {
-		entries[i] = &LogEntry{
+		entries[i] = &logparser.Entry{
 			Timestamp: base.Add(time.Duration(i) * time.Millisecond),
 			Content:   fmt.Sprintf("log line %d", i),
 			Group:     "test-group",

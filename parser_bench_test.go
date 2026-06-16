@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/buildkite/buildkite-logs/logparser"
 )
 
 // generateTestData creates synthetic log data for benchmarking
@@ -57,7 +59,7 @@ func generateTestData(numLines int) string {
 
 // BenchmarkParseLine tests the performance of parsing individual lines
 func BenchmarkParseLine(b *testing.B) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 	line := "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment"
 
 	b.ResetTimer()
@@ -71,7 +73,7 @@ func BenchmarkParseLine(b *testing.B) {
 
 // BenchmarkParseLineNoTimestamp tests parsing lines without OSC sequences
 func BenchmarkParseLineNoTimestamp(b *testing.B) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 	line := "Regular log line without timestamp information"
 
 	b.ResetTimer()
@@ -90,20 +92,17 @@ func BenchmarkIterator(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
 			data := generateTestData(size)
-			parser := NewParser()
+			parser := logparser.New(logparser.DefaultOptions())
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				reader := strings.NewReader(data)
-				iterator := parser.NewIterator(reader)
-
 				count := 0
-				for iterator.Next() {
+				for _, err := range parser.All(reader) {
+					if err != nil {
+						b.Fatal(err)
+					}
 					count++
-				}
-
-				if err := iterator.Err(); err != nil {
-					b.Fatal(err)
 				}
 
 				if count != size {
@@ -117,13 +116,13 @@ func BenchmarkIterator(b *testing.B) {
 // BenchmarkIteratorWithFiltering tests iterator performance with filtering
 func BenchmarkIteratorWithFiltering(b *testing.B) {
 	data := generateTestData(10000)
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	filters := []struct {
 		name string
-		fn   func(*LogEntry) bool
+		fn   func(*logparser.Entry) bool
 	}{
-		{"sections", func(e *LogEntry) bool { return e.IsGroup() }},
+		{"sections", func(e *logparser.Entry) bool { return e.IsGroup() }},
 	}
 
 	for _, filter := range filters {
@@ -131,17 +130,14 @@ func BenchmarkIteratorWithFiltering(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				reader := strings.NewReader(data)
-				iterator := parser.NewIterator(reader)
-
 				count := 0
-				for iterator.Next() {
-					if filter.fn(iterator.Entry()) {
+				for entry, err := range parser.All(reader) {
+					if err != nil {
+						b.Fatal(err)
+					}
+					if filter.fn(entry) {
 						count++
 					}
-				}
-
-				if err := iterator.Err(); err != nil {
-					b.Fatal(err)
 				}
 			}
 		})
@@ -153,21 +149,17 @@ func BenchmarkIteratorWithFiltering(b *testing.B) {
 // BenchmarkMemoryUsage provides a rough comparison of memory allocation patterns
 func BenchmarkMemoryUsage(b *testing.B) {
 	data := generateTestData(10000)
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	b.Run("iterator", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			reader := strings.NewReader(data)
-			iterator := parser.NewIterator(reader)
-
-			for iterator.Next() {
-				// Just iterate, don't store
-				_ = iterator.Entry()
-			}
-
-			if err := iterator.Err(); err != nil {
-				b.Fatal(err)
+			for entry, err := range parser.All(reader) {
+				if err != nil {
+					b.Fatal(err)
+				}
+				_ = entry
 			}
 		}
 	})
@@ -178,7 +170,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			reader := strings.NewReader(data)
 
 			// Collect all entries using streaming iterator
-			var entries []*LogEntry
+			var entries []*logparser.Entry
 			for entry, err := range parser.All(reader) {
 				if err != nil {
 					b.Fatal(err)
@@ -201,7 +193,7 @@ func BenchmarkSeq2Iterator(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
 			data := generateTestData(size)
-			parser := NewParser()
+			parser := logparser.New(logparser.DefaultOptions())
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -231,7 +223,7 @@ func BenchmarkParquetSeq2Export(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
 			data := generateTestData(size)
-			parser := NewParser()
+			parser := logparser.New(logparser.DefaultOptions())
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -252,7 +244,7 @@ func BenchmarkParquetSeq2Export(b *testing.B) {
 
 // BenchmarkParseLineCore tests the core parse performance
 func BenchmarkParseLineCore(b *testing.B) {
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 
 	testCases := []struct {
 		name string
@@ -279,11 +271,11 @@ func BenchmarkParseLineCore(b *testing.B) {
 // BenchmarkContentClassification tests entry classification performance
 func BenchmarkContentClassification(b *testing.B) {
 	data := generateTestData(1000)
-	parser := NewParser()
+	parser := logparser.New(logparser.DefaultOptions())
 	reader := strings.NewReader(data)
 
 	// Pre-parse entries
-	var entries []*LogEntry
+	var entries []*logparser.Entry
 	for entry, err := range parser.All(reader) {
 		if err != nil {
 			b.Fatal(err)

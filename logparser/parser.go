@@ -17,7 +17,14 @@ type Parser struct {
 	currentGroup string
 }
 
-func New(opts Options) *Parser {
+func New(options ...Option) *Parser {
+	opts := DefaultOptions()
+	for _, option := range options {
+		if option != nil {
+			option.apply(&opts)
+		}
+	}
+
 	return &Parser{
 		opts: normalizeOptions(opts),
 	}

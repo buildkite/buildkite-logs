@@ -83,6 +83,29 @@ func TestLineReaderTruncatesLongLine(t *testing.T) {
 	}
 }
 
+func TestNewWithFunctionalOptions(t *testing.T) {
+	parser := New(
+		WithMaxLineBytes(12),
+		WithTruncateLongLines(true),
+		WithTruncationSuffix("[cut]"),
+	)
+
+	var entries []*Entry
+	for entry, err := range parser.All(strings.NewReader("0123456789abcdef\n")) {
+		if err != nil {
+			t.Fatalf("All() error = %v", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if got := entries[0].Content; got != "0123456[cut]" {
+		t.Fatalf("content = %q, want %q", got, "0123456[cut]")
+	}
+}
+
 func TestParserUnterminatedOSCTreatedAsPlainContent(t *testing.T) {
 	parser := New(Options{ContextBytes: 3})
 	input := "\x1b_bk;t=123456"

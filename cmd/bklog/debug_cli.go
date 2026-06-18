@@ -98,7 +98,10 @@ func runDebug(config *DebugConfig) error {
 	}
 
 	parserOptions := debugParserOptions(config)
-	parser := logparser.New(parserOptions)
+	parser := logparser.New(
+		logparser.WithMaxLineBytes(parserOptions.MaxLineBytes),
+		logparser.WithTruncateLongLines(parserOptions.TruncateLongLines),
+	)
 	lineReader := logparser.NewLineReader(file, parserOptions)
 	processed := 0
 

@@ -9,7 +9,7 @@ import (
 )
 
 func TestAllHandlesLinesOverOneMiB(t *testing.T) {
-	parser := New(DefaultOptions())
+	parser := New()
 	content := strings.Repeat("a", 1024*1024+128)
 	input := "\x1b_bk;t=1745322209921\x07" + content
 
@@ -107,7 +107,7 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 }
 
 func TestParserUnterminatedOSCTreatedAsPlainContent(t *testing.T) {
-	parser := New(Options{ContextBytes: 3})
+	parser := New(WithContextBytes(3))
 	input := "\x1b_bk;t=123456"
 	entry, err := parser.ParseLine(input)
 	if err != nil {

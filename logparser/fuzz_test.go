@@ -27,10 +27,10 @@ func FuzzParseLine(f *testing.F) {
 			t.Skip("keep fuzz cases bounded")
 		}
 
-		parser := New(Options{
-			MaxLineBytes: 4096,
-			ContextBytes: 32,
-		})
+		parser := New(
+			WithMaxLineBytes(4096),
+			WithContextBytes(32),
+		)
 		entry, err := parser.ParseLine(input)
 		if err != nil {
 			assertParseErrorBounds(t, err, len(input), 32)
@@ -110,11 +110,11 @@ func FuzzParserAll(f *testing.F) {
 			t.Skip("keep fuzz cases bounded")
 		}
 
-		parser := New(Options{
-			MaxLineBytes:      4096,
-			TruncateLongLines: true,
-			ContextBytes:      32,
-		})
+		parser := New(
+			WithMaxLineBytes(4096),
+			WithTruncateLongLines(true),
+			WithContextBytes(32),
+		)
 		for entry, err := range parser.All(strings.NewReader(input)) {
 			if err != nil {
 				assertParseErrorBounds(t, err, len(input), 32)

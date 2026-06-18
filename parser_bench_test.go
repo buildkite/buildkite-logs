@@ -59,7 +59,7 @@ func generateTestData(numLines int) string {
 
 // BenchmarkParseLine tests the performance of parsing individual lines
 func BenchmarkParseLine(b *testing.B) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 	line := "\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment"
 
 	b.ResetTimer()
@@ -73,7 +73,7 @@ func BenchmarkParseLine(b *testing.B) {
 
 // BenchmarkParseLineNoTimestamp tests parsing lines without OSC sequences
 func BenchmarkParseLineNoTimestamp(b *testing.B) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 	line := "Regular log line without timestamp information"
 
 	b.ResetTimer()
@@ -92,7 +92,7 @@ func BenchmarkIterator(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
 			data := generateTestData(size)
-			parser := logparser.New(logparser.DefaultOptions())
+			parser := logparser.New()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -116,7 +116,7 @@ func BenchmarkIterator(b *testing.B) {
 // BenchmarkIteratorWithFiltering tests iterator performance with filtering
 func BenchmarkIteratorWithFiltering(b *testing.B) {
 	data := generateTestData(10000)
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	filters := []struct {
 		name string
@@ -149,7 +149,7 @@ func BenchmarkIteratorWithFiltering(b *testing.B) {
 // BenchmarkMemoryUsage provides a rough comparison of memory allocation patterns
 func BenchmarkMemoryUsage(b *testing.B) {
 	data := generateTestData(10000)
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	b.Run("iterator", func(b *testing.B) {
 		b.ResetTimer()
@@ -193,7 +193,7 @@ func BenchmarkSeq2Iterator(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
 			data := generateTestData(size)
-			parser := logparser.New(logparser.DefaultOptions())
+			parser := logparser.New()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -223,7 +223,7 @@ func BenchmarkParquetSeq2Export(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
 			data := generateTestData(size)
-			parser := logparser.New(logparser.DefaultOptions())
+			parser := logparser.New()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -244,7 +244,7 @@ func BenchmarkParquetSeq2Export(b *testing.B) {
 
 // BenchmarkParseLineCore tests the core parse performance
 func BenchmarkParseLineCore(b *testing.B) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testCases := []struct {
 		name string
@@ -271,7 +271,7 @@ func BenchmarkParseLineCore(b *testing.B) {
 // BenchmarkContentClassification tests entry classification performance
 func BenchmarkContentClassification(b *testing.B) {
 	data := generateTestData(1000)
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 	reader := strings.NewReader(data)
 
 	// Pre-parse entries

@@ -25,6 +25,10 @@ func New(options ...Option) *Parser {
 		}
 	}
 
+	return newParserWithOptions(opts)
+}
+
+func newParserWithOptions(opts Options) *Parser {
 	return &Parser{
 		opts: normalizeOptions(opts),
 	}
@@ -56,7 +60,7 @@ func (p *Parser) ParseLineBytes(line []byte, meta Line) (*Entry, error) {
 // isolated group state so a parser can be reused safely.
 func (p *Parser) All(reader io.Reader) iter.Seq2[*Entry, error] {
 	return func(yield func(*Entry, error) bool) {
-		localParser := New(p.opts)
+		localParser := newParserWithOptions(p.opts)
 		lineReader := NewLineReader(reader, p.opts)
 
 		for {

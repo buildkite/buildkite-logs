@@ -135,10 +135,10 @@ func runParse(ctx context.Context, config *Config) error {
 		BytesProcessed: bytesProcessed,
 	}
 
-	parserOptions := logparser.DefaultOptions()
-	parserOptions.MaxLineBytes = config.MaxLineBytes
-	parserOptions.TruncateLongLines = config.TruncateLongLines
-	parser := logparser.New(parserOptions)
+	parser := logparser.New(
+		logparser.WithMaxLineBytes(config.MaxLineBytes),
+		logparser.WithTruncateLongLines(config.TruncateLongLines),
+	)
 
 	// Handle export options
 	switch {

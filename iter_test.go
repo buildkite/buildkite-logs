@@ -10,7 +10,7 @@ import (
 )
 
 func TestIterSeq2(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +
@@ -49,7 +49,7 @@ func TestIterSeq2(t *testing.T) {
 }
 
 func TestIterSeq2EarlyExit(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +
@@ -82,7 +82,7 @@ func TestIterSeq2EarlyExit(t *testing.T) {
 }
 
 func TestIterSeq2GroupTracking(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +
@@ -117,7 +117,7 @@ func TestIterSeq2GroupTracking(t *testing.T) {
 }
 
 func TestIterSeq2WithFiltering(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +
@@ -157,7 +157,7 @@ func TestIterSeq2WithFiltering(t *testing.T) {
 }
 
 func TestAllScannerError(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 	reader := iotest.ErrReader(fmt.Errorf("disk read failure"))
 
 	var gotErr error

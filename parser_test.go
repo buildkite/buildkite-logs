@@ -12,7 +12,7 @@ import (
 // group tracking on top of ByteParser.ParseLine). For byte-level parsing tests,
 // see TestByteParserBasic in scanner_test.go.
 func TestParseLine(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	tests := []struct {
 		name        string
@@ -88,7 +88,7 @@ func TestParseLine(t *testing.T) {
 }
 
 func TestLogEntryClassification(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	tests := []struct {
 		name      string
@@ -133,7 +133,7 @@ func TestLogEntryClassification(t *testing.T) {
 }
 
 func TestParseReader(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	input := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment\n" +
@@ -186,7 +186,7 @@ func TestParseReader(t *testing.T) {
 }
 
 func TestParserAllCompatibility(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	input := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209921\x07[90m$[0m /buildkite/agent/hooks/environment\n" +
@@ -242,7 +242,7 @@ func TestParserAllCompatibility(t *testing.T) {
 }
 
 func TestLogIteratorEmpty(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 	reader := strings.NewReader("")
 
 	for range parser.All(reader) {
@@ -251,7 +251,7 @@ func TestLogIteratorEmpty(t *testing.T) {
 }
 
 func TestLogIteratorInvalidTimestamp(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	// An overflowing timestamp in valid OSC framing should not cause an error;
 	// the line is returned with a zero timestamp and the OSC envelope stripped.
@@ -312,7 +312,7 @@ func TestComputeFlags(t *testing.T) {
 		},
 	}
 
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			entry, err := parser.ParseLine(tt.input)
@@ -333,7 +333,7 @@ func TestComputeFlags(t *testing.T) {
 }
 
 func TestParseLineEdgeCases(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	inputs := []string{
 		"",
@@ -355,7 +355,7 @@ func TestParseLineEdgeCases(t *testing.T) {
 }
 
 func TestParseLineMultiOSCTruncation(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	input := "\x1b_bk;t=1745322209921\x07first content\x1b_bk;t=1745322209922\x07second content"
 	entry, err := parser.ParseLine(input)

@@ -98,11 +98,8 @@ func runDebug(config *DebugConfig) error {
 	}
 
 	parserOptions := debugParserOptions(config)
-	parser := logparser.New(
-		logparser.WithMaxLineBytes(parserOptions.MaxLineBytes),
-		logparser.WithTruncateLongLines(parserOptions.TruncateLongLines),
-	)
-	lineReader := logparser.NewLineReader(file, parserOptions)
+	parser := logparser.New(parserOptions...)
+	lineReader := logparser.NewLineReader(file, parserOptions...)
 	processed := 0
 
 	// Calculate end line
@@ -169,11 +166,11 @@ func runDebug(config *DebugConfig) error {
 	return nil
 }
 
-func debugParserOptions(config *DebugConfig) logparser.Options {
-	options := logparser.DefaultOptions()
-	options.MaxLineBytes = config.MaxLineBytes
-	options.TruncateLongLines = config.TruncateLongLines
-	return options
+func debugParserOptions(config *DebugConfig) []logparser.Option {
+	return []logparser.Option{
+		logparser.WithMaxLineBytes(config.MaxLineBytes),
+		logparser.WithTruncateLongLines(config.TruncateLongLines),
+	}
 }
 
 // extractTimestampsToCSV extracts all OSC timestamps from the log file and exports to CSV
@@ -198,7 +195,7 @@ func extractTimestampsToCSV(config *DebugConfig) error {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	lineReader := logparser.NewLineReader(file, debugParserOptions(config))
+	lineReader := logparser.NewLineReader(file, debugParserOptions(config)...)
 	totalTimestamps := 0
 
 	for {

@@ -24,8 +24,11 @@ type LineReader struct {
 	offset int64
 }
 
-func NewLineReader(r io.Reader, opts Options) *LineReader {
-	opts = normalizeOptions(opts)
+func NewLineReader(r io.Reader, options ...Option) *LineReader {
+	return newLineReaderWithOptions(r, optionsFrom(options...))
+}
+
+func newLineReaderWithOptions(r io.Reader, opts Options) *LineReader {
 	return &LineReader{
 		reader: bufio.NewReaderSize(r, opts.BufferSize),
 		opts:   opts,

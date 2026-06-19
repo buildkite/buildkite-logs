@@ -63,12 +63,13 @@ func FuzzLineReader(f *testing.F) {
 			t.Skip("keep fuzz cases bounded")
 		}
 
-		reader := NewLineReader(strings.NewReader(input), Options{
-			MaxLineBytes:      4096,
-			TruncateLongLines: true,
-			TruncationSuffix:  "[truncated]",
-			ContextBytes:      32,
-		})
+		reader := NewLineReader(
+			strings.NewReader(input),
+			WithMaxLineBytes(4096),
+			WithTruncateLongLines(true),
+			WithTruncationSuffix("[truncated]"),
+			WithContextBytes(32),
+		)
 
 		for {
 			line, err := reader.Next()

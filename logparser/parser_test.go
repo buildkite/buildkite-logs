@@ -33,10 +33,11 @@ func TestAllHandlesLinesOverOneMiB(t *testing.T) {
 }
 
 func TestLineReaderHardErrorsOnLongLine(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("0123456789abcdef\nnext"), Options{
-		MaxLineBytes: 8,
-		ContextBytes: 4,
-	})
+	reader := NewLineReader(
+		strings.NewReader("0123456789abcdef\nnext"),
+		WithMaxLineBytes(8),
+		WithContextBytes(4),
+	)
 
 	_, err := reader.Next()
 	if err == nil {
@@ -62,11 +63,12 @@ func TestLineReaderHardErrorsOnLongLine(t *testing.T) {
 }
 
 func TestLineReaderTruncatesLongLine(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("0123456789abcdef\n"), Options{
-		MaxLineBytes:      12,
-		TruncateLongLines: true,
-		TruncationSuffix:  "[cut]",
-	})
+	reader := NewLineReader(
+		strings.NewReader("0123456789abcdef\n"),
+		WithMaxLineBytes(12),
+		WithTruncateLongLines(true),
+		WithTruncationSuffix("[cut]"),
+	)
 
 	line, err := reader.Next()
 	if err != nil {
@@ -125,10 +127,11 @@ func TestParserUnterminatedOSCTreatedAsPlainContent(t *testing.T) {
 }
 
 func TestParseErrorStringOmitsContextBytes(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"), Options{
-		MaxLineBytes: 8,
-		ContextBytes: 32,
-	})
+	reader := NewLineReader(
+		strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"),
+		WithMaxLineBytes(8),
+		WithContextBytes(32),
+	)
 	_, err := reader.Next()
 	if err == nil {
 		t.Fatal("expected line-too-long error")
@@ -155,10 +158,11 @@ func TestParseErrorStringOmitsContextBytes(t *testing.T) {
 }
 
 func TestParseErrorAllowsZeroContextBytes(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"), Options{
-		MaxLineBytes: 8,
-		ContextBytes: 0,
-	})
+	reader := NewLineReader(
+		strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"),
+		WithMaxLineBytes(8),
+		WithContextBytes(0),
+	)
 	_, err := reader.Next()
 	if err == nil {
 		t.Fatal("expected line-too-long error")
@@ -174,7 +178,7 @@ func TestParseErrorAllowsZeroContextBytes(t *testing.T) {
 }
 
 func TestLineReaderNoFinalNewline(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("first\nsecond"), DefaultOptions())
+	reader := NewLineReader(strings.NewReader("first\nsecond"))
 
 	line, err := reader.Next()
 	if err != nil {

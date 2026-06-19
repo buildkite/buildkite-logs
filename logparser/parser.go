@@ -18,14 +18,7 @@ type Parser struct {
 }
 
 func New(options ...Option) *Parser {
-	opts := DefaultOptions()
-	for _, option := range options {
-		if option != nil {
-			option.apply(&opts)
-		}
-	}
-
-	return newParserWithOptions(opts)
+	return newParserWithOptions(optionsFrom(options...))
 }
 
 func newParserWithOptions(opts Options) *Parser {
@@ -61,7 +54,7 @@ func (p *Parser) ParseLineBytes(line []byte, meta Line) (*Entry, error) {
 func (p *Parser) All(reader io.Reader) iter.Seq2[*Entry, error] {
 	return func(yield func(*Entry, error) bool) {
 		localParser := newParserWithOptions(p.opts)
-		lineReader := NewLineReader(reader, p.opts)
+		lineReader := newLineReaderWithOptions(reader, p.opts)
 
 		for {
 			line, err := lineReader.Next()

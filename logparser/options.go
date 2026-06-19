@@ -38,6 +38,16 @@ func DefaultOptions() Options {
 	}
 }
 
+func optionsFrom(options ...Option) Options {
+	opts := DefaultOptions()
+	for _, option := range options {
+		if option != nil {
+			option.apply(&opts)
+		}
+	}
+	return normalizeOptions(opts)
+}
+
 // WithBufferSize sets the buffered reader size used while reading log lines.
 func WithBufferSize(size int) Option {
 	return optionFunc(func(opts *Options) {

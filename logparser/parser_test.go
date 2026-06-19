@@ -9,7 +9,7 @@ import (
 )
 
 func TestAllHandlesLinesOverOneMiB(t *testing.T) {
-	parser := New(DefaultOptions())
+	parser := New()
 	content := strings.Repeat("a", 1024*1024+128)
 	input := "\x1b_bk;t=1745322209921\x07" + content
 
@@ -33,10 +33,11 @@ func TestAllHandlesLinesOverOneMiB(t *testing.T) {
 }
 
 func TestLineReaderHardErrorsOnLongLine(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("0123456789abcdef\nnext"), Options{
-		MaxLineBytes: 8,
-		ContextBytes: 4,
-	})
+	reader := NewLineReader(
+		strings.NewReader("0123456789abcdef\nnext"),
+		WithMaxLineBytes(8),
+		WithContextBytes(4),
+	)
 
 	_, err := reader.Next()
 	if err == nil {
@@ -62,11 +63,12 @@ func TestLineReaderHardErrorsOnLongLine(t *testing.T) {
 }
 
 func TestLineReaderTruncatesLongLine(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("0123456789abcdef\n"), Options{
-		MaxLineBytes:      12,
-		TruncateLongLines: true,
-		TruncationSuffix:  "[cut]",
-	})
+	reader := NewLineReader(
+		strings.NewReader("0123456789abcdef\n"),
+		WithMaxLineBytes(12),
+		WithTruncateLongLines(true),
+		WithTruncationSuffix("[cut]"),
+	)
 
 	line, err := reader.Next()
 	if err != nil {
@@ -83,8 +85,31 @@ func TestLineReaderTruncatesLongLine(t *testing.T) {
 	}
 }
 
+func TestNewWithFunctionalOptions(t *testing.T) {
+	parser := New(
+		WithMaxLineBytes(12),
+		WithTruncateLongLines(true),
+		WithTruncationSuffix("[cut]"),
+	)
+
+	var entries []*Entry
+	for entry, err := range parser.All(strings.NewReader("0123456789abcdef\n")) {
+		if err != nil {
+			t.Fatalf("All() error = %v", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if got := entries[0].Content; got != "0123456[cut]" {
+		t.Fatalf("content = %q, want %q", got, "0123456[cut]")
+	}
+}
+
 func TestParserUnterminatedOSCTreatedAsPlainContent(t *testing.T) {
-	parser := New(Options{ContextBytes: 3})
+	parser := New(WithContextBytes(3))
 	input := "\x1b_bk;t=123456"
 	entry, err := parser.ParseLine(input)
 	if err != nil {
@@ -102,10 +127,11 @@ func TestParserUnterminatedOSCTreatedAsPlainContent(t *testing.T) {
 }
 
 func TestParseErrorStringOmitsContextBytes(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"), Options{
-		MaxLineBytes: 8,
-		ContextBytes: 32,
-	})
+	reader := NewLineReader(
+		strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"),
+		WithMaxLineBytes(8),
+		WithContextBytes(32),
+	)
 	_, err := reader.Next()
 	if err == nil {
 		t.Fatal("expected line-too-long error")
@@ -132,10 +158,11 @@ func TestParseErrorStringOmitsContextBytes(t *testing.T) {
 }
 
 func TestParseErrorAllowsZeroContextBytes(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"), Options{
-		MaxLineBytes: 8,
-		ContextBytes: 0,
-	})
+	reader := NewLineReader(
+		strings.NewReader("prefix_SECRET_TOKEN_123_suffix\n"),
+		WithMaxLineBytes(8),
+		WithContextBytes(0),
+	)
 	_, err := reader.Next()
 	if err == nil {
 		t.Fatal("expected line-too-long error")
@@ -151,7 +178,7 @@ func TestParseErrorAllowsZeroContextBytes(t *testing.T) {
 }
 
 func TestLineReaderNoFinalNewline(t *testing.T) {
-	reader := NewLineReader(strings.NewReader("first\nsecond"), DefaultOptions())
+	reader := NewLineReader(strings.NewReader("first\nsecond"))
 
 	line, err := reader.Next()
 	if err != nil {

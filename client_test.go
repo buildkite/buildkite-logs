@@ -10,15 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/buildkite/buildkite-logs/logparser"
 	"github.com/buildkite/go-buildkite/v5"
 )
-
-func TestDefaultClientParserOptionsTruncateLongLines(t *testing.T) {
-	options := defaultClientParserOptions()
-	if !options.TruncateLongLines {
-		t.Fatal("client parser options should truncate long lines to avoid aborting ingestion")
-	}
-}
 
 // mockBuildkiteAPI implements BuildkiteAPI for testing with call tracking
 type mockBuildkiteAPI struct {
@@ -105,7 +99,10 @@ func TestClient_NewClient(t *testing.T) {
 	tempDir := t.TempDir()
 	storageURL := "file://" + tempDir
 
-	c, err := NewClient(t.Context(), client, storageURL)
+	c, err := NewClient(t.Context(), client, storageURL, WithParserOptions(
+		logparser.WithMaxLineBytes(12),
+		logparser.WithTruncationSuffix("[cut]"),
+	))
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -114,15 +111,52 @@ func TestClient_NewClient(t *testing.T) {
 	if c.storageURL != storageURL {
 		t.Errorf("storageURL = %q, want %q", c.storageURL, storageURL)
 	}
+	entries, err := parseWithClientParser(c, "0123456789abcdef\n")
+	if err != nil {
+		t.Fatalf("client parser error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("client parser entries = %d, want 1", len(entries))
+	}
+	if got := entries[0].Content; got != "0123456[cut]" {
+		t.Fatalf("client parser content = %q, want %q", got, "0123456[cut]")
+	}
 }
 
 func TestClient_NewClientWithAPI(t *testing.T) {
 	mock := newTerminalMock()
-	client := newTestClient(t, mock)
+	client := newTestClient(t, mock, WithParserOptions(
+		logparser.WithMaxLineBytes(12),
+		logparser.WithTruncateLongLines(false),
+	))
 
 	if client.api != mock {
 		t.Error("api not set to mock")
 	}
+	if _, err := parseWithClientParser(client, "0123456789abcdef\n"); err == nil {
+		t.Fatal("expected client parser to reject long lines when truncation is disabled")
+	}
+}
+
+func TestClient_WithParserOptionsAcceptsNilOption(t *testing.T) {
+	mock := newTerminalMock()
+	client := newTestClient(t, mock, WithParserOptions(nil))
+
+	if _, err := parseWithClientParser(client, "0123456789abcdef\n"); err != nil {
+		t.Fatalf("nil parser option should keep a usable parser: %v", err)
+	}
+}
+
+func parseWithClientParser(client *Client, input string) ([]*logparser.Entry, error) {
+	parser := client.newDefaultClientParser()
+	var entries []*logparser.Entry
+	for entry, err := range parser.All(strings.NewReader(input)) {
+		if err != nil {
+			return entries, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 
 func TestClient_NewReader_Validation(t *testing.T) {

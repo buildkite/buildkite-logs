@@ -8,7 +8,7 @@ import (
 )
 
 func TestGroupTracking(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := []string{
 		"\x1b_bk;t=1745322209921\x07~~~ Running global environment hook",
@@ -43,7 +43,7 @@ func TestGroupTracking(t *testing.T) {
 }
 
 func TestGroupTrackingWithIterator(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := `~~~ Running global environment hook
 [90m$[0m /buildkite/agent/hooks/environment
@@ -85,7 +85,7 @@ Test output line`
 }
 
 func TestGroupTrackingMalformedTimestamp(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := "\x1b_bk;t=invalid\x07~~~ Setup phase\n" +
 		"\x1b_bk;t=1745322209922\x07some output"

@@ -34,6 +34,13 @@ func WithMaxLogBytes(n int64) ClientOption {
 	}
 }
 
+// WithParserOptions sets parser options used when converting downloaded logs to Parquet.
+func WithParserOptions(options ...logparser.Option) ClientOption {
+	return func(c *Client) {
+		c.parserOptions = append([]logparser.Option(nil), options...)
+	}
+}
+
 // Hook function types for different stages of downloadAndCacheWithBlobStorage
 type AfterCacheCheckFunc func(ctx context.Context, result *CacheCheckResult)
 type AfterJobStatusFunc func(ctx context.Context, result *JobStatusResult)
@@ -142,14 +149,15 @@ func (h *Hooks) AddAfterLocalCache(hook AfterLocalCacheFunc) {
 
 // Client provides a high-level convenience API for common buildkite-logs-parquet operations
 type Client struct {
-	api          BuildkiteAPI
-	storageURL   string
-	blobStorage  *BlobStorage
-	hooks        *Hooks
-	maxLogBytes  int64 // 0 means no limit
-	refreshGroup singleflight.Group
-	statusGroup  singleflight.Group
-	statusCache  sync.Map // map[string]statusCacheEntry
+	api           BuildkiteAPI
+	storageURL    string
+	blobStorage   *BlobStorage
+	hooks         *Hooks
+	maxLogBytes   int64 // 0 means no limit
+	refreshGroup  singleflight.Group
+	statusGroup   singleflight.Group
+	statusCache   sync.Map // map[string]statusCacheEntry
+	parserOptions []logparser.Option
 }
 
 type statusCacheEntry struct {
@@ -184,6 +192,12 @@ func NewClientWithAPI(ctx context.Context, api BuildkiteAPI, storageURL string, 
 	}
 
 	return c, nil
+}
+
+func (c *Client) newDefaultClientParser() *logparser.Parser {
+	return logparser.New(append([]logparser.Option{
+		logparser.WithTruncateLongLines(true),
+	}, c.parserOptions...)...)
 }
 
 // NewReader downloads and caches job logs (if needed) and returns a ParquetReader for querying.
@@ -404,7 +418,6 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 	}
 
 	logParsingStart := time.Now()
-	parser := logparser.New(defaultClientParserOptions())
 	tempFile, err := os.CreateTemp("", "bklog-*.parquet")
 	if err != nil {
 		logParsingDuration := time.Since(logParsingStart)
@@ -421,6 +434,7 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 		_ = os.Remove(tempPath)
 	}()
 
+	parser := c.newDefaultClientParser()
 	logEntries, err := ExportSeq2ToParquetWithFilterAndStats(parser.All(logReader), tempPath, nil)
 	logParsingDuration := time.Since(logParsingStart)
 	if err != nil {
@@ -477,12 +491,6 @@ func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pi
 	}
 
 	return nil
-}
-
-func defaultClientParserOptions() logparser.Options {
-	options := logparser.DefaultOptions()
-	options.TruncateLongLines = true
-	return options
 }
 
 func (c *Client) createLocalCacheFileWithHooks(ctx context.Context, org, pipeline, build, job, blobKey string) (string, error) {

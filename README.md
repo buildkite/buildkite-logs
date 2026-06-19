@@ -897,7 +897,7 @@ type logparser.Entry struct {
 ```go
 import "github.com/buildkite/buildkite-logs/logparser"
 
-parser := logparser.New(logparser.DefaultOptions())
+parser := logparser.New()
 for entry, err := range parser.All(reader) {
     // entry is a *logparser.Entry
 }

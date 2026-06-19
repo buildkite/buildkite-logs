@@ -233,7 +233,7 @@ func TestParquetRoundtripRowNumbers(t *testing.T) {
 }
 
 func TestParquetSeq2Export(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +
@@ -265,7 +265,7 @@ func TestParquetSeq2Export(t *testing.T) {
 }
 
 func TestParquetSeq2ExportWriter(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 	testData := "\x1b_bk;t=1745322209921\x07first line\n" +
 		"\x1b_bk;t=1745322209922\x07second line"
 
@@ -283,7 +283,7 @@ func TestParquetSeq2ExportWriter(t *testing.T) {
 }
 
 func TestParquetSeq2ExportWithFilter(t *testing.T) {
-	parser := logparser.New(logparser.DefaultOptions())
+	parser := logparser.New()
 
 	testData := "\x1b_bk;t=1745322209921\x07~~~ Running global environment hook\n" +
 		"\x1b_bk;t=1745322209922\x07$ /buildkite/agent/hooks/environment\n" +

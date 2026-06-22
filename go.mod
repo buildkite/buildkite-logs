@@ -6,7 +6,7 @@ require (
 	github.com/apache/arrow-go/v18 v18.6.0
 	github.com/buildkite/go-buildkite/v5 v5.0.1
 	gocloud.dev v0.46.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.21.0
 )
 
 require (

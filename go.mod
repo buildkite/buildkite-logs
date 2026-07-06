@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/apache/arrow-go/v18 v18.6.0
-	github.com/buildkite/go-buildkite/v5 v5.0.1
+	github.com/buildkite/go-buildkite/v5 v5.3.1
 	gocloud.dev v0.46.0
 	golang.org/x/sync v0.20.0
 )
@@ -31,7 +31,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.3 // indirect
 	github.com/aws/smithy-go v1.26.0 // indirect
-	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
+	github.com/buildkite/roko v1.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

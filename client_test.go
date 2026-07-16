@@ -218,8 +218,13 @@ func TestClient_NewReader_CacheHit(t *testing.T) {
 	defer reader1.Close()
 
 	initialLogCalls := mock.getLogCalls
+	blobKey := GenerateBlobKey("org", "pipeline", "123", "job-1")
+	client.statusCache.Store(blobKey, statusCacheEntry{
+		status:    mock.jobStatus,
+		fetchedAt: time.Now().Add(-defaultStatusCacheTTL - time.Second),
+	})
 
-	// Second call should use cache (terminal job)
+	// The terminal cache remains usable, but access and current status are checked.
 	reader2, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("second NewReader: %v", err)
@@ -229,8 +234,33 @@ func TestClient_NewReader_CacheHit(t *testing.T) {
 	if mock.getLogCalls != initialLogCalls {
 		t.Errorf("expected no additional log downloads on cache hit, got %d extra calls", mock.getLogCalls-initialLogCalls)
 	}
-	if _, statusCalls := mock.calls(); statusCalls != 1 {
-		t.Errorf("expected terminal cache hit to skip job status, got %d status calls", statusCalls)
+	if _, statusCalls := mock.calls(); statusCalls != 2 {
+		t.Errorf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+}
+
+func TestClient_TerminalCacheHit_RequiresJobAccess(t *testing.T) {
+	mock := newTerminalMock()
+	client := newTestClient(t, mock)
+
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("initial NewReader: %v", err)
+	}
+	defer reader.Close()
+
+	blobKey := GenerateBlobKey("org", "pipeline", "123", "job-1")
+	client.statusCache.Delete(blobKey)
+	mock.statusErr = errors.New("job access denied")
+
+	_, err = client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if !errors.Is(err, mock.statusErr) {
+		t.Fatalf("NewReader error = %v, want %v", err, mock.statusErr)
+	}
+
+	logCalls, _ := mock.calls()
+	if logCalls != 1 {
+		t.Fatalf("GetJobLog calls = %d, want 1", logCalls)
 	}
 }
 

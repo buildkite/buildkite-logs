@@ -103,42 +103,33 @@ func TestValidateAPIParams(t *testing.T) {
 	}
 }
 
-// TestGetJobStatus_RetriedJob verifies that GetJobStatus resolves the original
-// job ID when it has been retried and replaced in the build's jobs array.
-// See: https://github.com/buildkite/buildkite-mcp-server/issues/228
-func TestGetJobStatus_RetriedJob(t *testing.T) {
+func TestGetJobStatus_UsesJobEndpoint(t *testing.T) {
 	const (
 		originalJobID    = "019ce437-f44f-4528-9d74-dfae306fed69"
 		replacementJobID = "019ce438-3423-432e-a4f2-b0bfbffcc980"
 	)
 
-	// Simulate the Buildkite API response for build 76 with a retried job.
-	// The original job is NOT in the jobs array — only the replacement is,
-	// with retry_source.job_id pointing back to the original.
-	buildResponse := buildkite.Build{
-		Number: 76,
-		Jobs: []buildkite.Job{
-			{
-				ID:    "019ce437-f433-4bc9-a728-8c4f4520e72e",
-				State: "passed",
-				Name:  "Build",
-			},
-			{
-				ID:           replacementJobID,
-				State:        "failed",
-				Name:         "Test",
-				RetriesCount: 1,
-				RetrySource: &buildkite.JobRetrySource{
-					JobID:     originalJobID,
-					RetryType: "manual",
-				},
-			},
-		},
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/v2/organizations/myorg/pipelines/starter-pipeline/builds/76/jobs/"
+		if len(r.URL.Path) <= len(prefix) || r.URL.Path[:len(prefix)] != prefix {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+
+		var job buildkite.Job
+		switch r.URL.Path[len(prefix):] {
+		case replacementJobID:
+			job = buildkite.Job{ID: replacementJobID, State: "passed"}
+		case originalJobID:
+			job = buildkite.Job{ID: originalJobID, State: "failed"}
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(buildResponse); err != nil {
+		if err := json.NewEncoder(w).Encode(job); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}))
@@ -163,21 +154,21 @@ func TestGetJobStatus_RetriedJob(t *testing.T) {
 		if status.ID != replacementJobID {
 			t.Errorf("ID = %q, want %q", status.ID, replacementJobID)
 		}
-		if status.State != JobStateFailed {
-			t.Errorf("State = %q, want %q", status.State, JobStateFailed)
+		if status.State != JobStatePassed {
+			t.Errorf("State = %q, want %q", status.State, JobStatePassed)
 		}
 	})
 
-	t.Run("original retried job resolved via retry_source", func(t *testing.T) {
+	t.Run("original retried job fetched directly", func(t *testing.T) {
 		status, err := apiClient.GetJobStatus(ctx, "myorg", "starter-pipeline", "76", originalJobID)
 		if err != nil {
-			t.Fatalf("GetJobStatus should resolve retried job, got: %v", err)
+			t.Fatalf("GetJobStatus: %v", err)
 		}
 		if status.ID != originalJobID {
 			t.Errorf("ID = %q, want %q", status.ID, originalJobID)
 		}
 		if !status.IsTerminal {
-			t.Error("retried job should be terminal")
+			t.Error("failed job should be terminal")
 		}
 	})
 

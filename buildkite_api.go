@@ -95,62 +95,16 @@ func (c *BuildkiteAPIClient) GetJobLog(ctx context.Context, org, pipeline, build
 
 // GetJobStatus gets the current status of a job
 func (c *BuildkiteAPIClient) GetJobStatus(ctx context.Context, org, pipeline, build, jobID string) (*JobStatus, error) {
-	buildInfo, _, err := c.client.Builds.Get(ctx, org, pipeline, build, nil)
+	job, _, err := c.client.Jobs.GetJob(ctx, org, pipeline, build, jobID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get build info: %w", err)
+		return nil, fmt.Errorf("failed to get job: %w", err)
 	}
 
-	// buildInfo is a struct, so no need to check for nil
-
-	// Find the specific job in the build
-	var job buildkite.Job
-	var jobFound bool
-	for _, j := range buildInfo.Jobs {
-		if j.ID == jobID {
-			job = j
-			jobFound = true
-			break
-		}
+	if job.ID != jobID {
+		return nil, fmt.Errorf("job ID mismatch: got %q, want %q", job.ID, jobID)
 	}
 
-	if !jobFound {
-		// Check if the job was retried — the original job ID is replaced in the
-		// build's jobs array, but a replacement job will reference it via RetrySource.
-		// See: https://github.com/buildkite/buildkite-mcp-server/issues/228
-		for _, j := range buildInfo.Jobs {
-			if j.RetrySource != nil && j.RetrySource.JobID == jobID {
-				// The original job was retried and replaced by this job.
-				// Retried jobs are always terminal (they finished before being retried).
-				return &JobStatus{
-					ID:         jobID,
-					State:      JobStateFailed,
-					IsTerminal: true,
-				}, nil
-			}
-		}
-
-		return nil, fmt.Errorf("job not found: %s", jobID)
-	}
-
-	// Convert buildkite job to our JobStatus
-	state := JobState(job.State)
-	status := &JobStatus{
-		ID:         job.ID,
-		State:      state,
-		IsTerminal: IsTerminalState(state),
-		WebURL:     job.WebURL,
-	}
-
-	if job.ExitStatus != nil {
-		status.ExitStatus = job.ExitStatus
-	}
-
-	if job.FinishedAt != nil {
-		finishedAt := job.FinishedAt.Time
-		status.FinishedAt = &finishedAt
-	}
-
-	return status, nil
+	return jobStatusFromJob(job), nil
 }
 
 // ValidateAPIParams validates that all required API parameters are provided

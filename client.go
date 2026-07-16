@@ -313,13 +313,13 @@ func (c *Client) cacheUsable(ctx context.Context, api BuildkiteAPI, org, pipelin
 	if err != nil || metadata == nil {
 		return false, err
 	}
-	if metadata.IsTerminal {
-		return true, nil
-	}
 
 	status, err := c.getJobStatusMemoized(ctx, api, org, pipeline, build, job, blobKey)
 	if err != nil {
 		return false, err
+	}
+	if metadata.IsTerminal && status.IsTerminal {
+		return true, nil
 	}
 	if status.IsTerminal {
 		return false, nil

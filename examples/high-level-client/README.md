@@ -84,7 +84,9 @@ The example uses `file://~/.bklog` as the storage URL, but you can use other bac
 
 - **TTL**: Set to 5 minutes in the example - logs are re-fetched if older than this
 - **Force Refresh**: Set to `false` - change to `true` to always re-download
-- **Terminal Jobs**: Jobs that are finished (passed/failed/canceled) are cached permanently
+- **Access Checks**: Every cached read calls `JobLogExists` using the current API identity and fails closed if the log is missing or inaccessible
+- **Terminal Jobs**: Finished jobs are cached without a TTL or status lookup, but access is still checked before each read
+- **Non-terminal Jobs**: Within the TTL, current job state is checked so terminal transitions trigger an immediate final refresh
 
 ## Key Functions
 
@@ -94,7 +96,16 @@ Creates a client using the official go-buildkite client.
 
 ### `NewClientWithAPI(api, storageURL)`
 
-Creates a client using a custom API implementation.
+Creates a client using a custom `BuildkiteAPI` implementation. Custom APIs must
+implement `GetJobStatus`, `JobLogExists`, and `GetJobLog`. `JobLogExists` must
+perform an authenticated check using the current API identity without fetching
+the log body. Return `false, nil` for a missing log and an error when the check
+fails. The client returns `ErrJobLogUnavailable` rather than serving cached data
+when the method returns false.
+
+This is an intentional source-breaking interface change during `0.x`
+development. The official implementation depends on
+`github.com/buildkite/go-buildkite/v5` v5.6.0 or later for `JobLogExists`.
 
 ### `DownloadAndCache(ctx, org, pipeline, build, job, ttl, forceRefresh)`
 

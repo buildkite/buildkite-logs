@@ -195,6 +195,72 @@ func TestGetJobLog_NoToken(t *testing.T) {
 	}
 }
 
+func TestJobLogExists(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Errorf("method = %s, want HEAD", r.Method)
+		}
+		if r.URL.Path != "/v2/organizations/org/pipelines/pipeline/builds/123/jobs/job/log" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	bkClient, err := buildkite.NewOpts(
+		buildkite.WithBaseURL(server.URL),
+		buildkite.WithTokenAuth("test-token"),
+	)
+	if err != nil {
+		t.Fatalf("NewOpts: %v", err)
+	}
+
+	exists, err := NewBuildkiteAPIExistingClient(bkClient).JobLogExists(
+		t.Context(), "org", "pipeline", "123", "job",
+	)
+	if err != nil {
+		t.Fatalf("JobLogExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("JobLogExists = false, want true")
+	}
+}
+
+func TestJobLogExists_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	bkClient, err := buildkite.NewOpts(
+		buildkite.WithBaseURL(server.URL),
+		buildkite.WithTokenAuth("test-token"),
+	)
+	if err != nil {
+		t.Fatalf("NewOpts: %v", err)
+	}
+
+	exists, err := NewBuildkiteAPIExistingClient(bkClient).JobLogExists(
+		t.Context(), "org", "pipeline", "123", "missing-job",
+	)
+	if err != nil {
+		t.Fatalf("JobLogExists: %v", err)
+	}
+	if exists {
+		t.Fatal("JobLogExists = true, want false")
+	}
+}
+
+func TestJobLogExists_NoToken(t *testing.T) {
+	client := NewBuildkiteAPIClient("", "test")
+
+	exists, err := client.JobLogExists(t.Context(), "org", "pipeline", "build", "job")
+	if err == nil {
+		t.Fatal("expected error when API token is empty")
+	}
+	if exists {
+		t.Fatal("JobLogExists = true, want false")
+	}
+}
+
 func TestGetJobLog_StreamsPlainText(t *testing.T) {
 	const logContent = "\x1b_bk;t=1745322209921\x07first line\nsecond line\n"
 

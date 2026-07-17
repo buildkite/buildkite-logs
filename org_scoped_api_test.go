@@ -213,6 +213,10 @@ func (a *customOrgScopedAPI) GetJobLog(ctx context.Context, org, pipeline, build
 	return io.NopCloser(strings.NewReader(a.log)), nil
 }
 
+func (a *customOrgScopedAPI) JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error) {
+	return true, nil
+}
+
 func (a *customOrgScopedAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error) {
 	return jobStatusFromJob(a.job), nil
 }

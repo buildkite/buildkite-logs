@@ -21,6 +21,11 @@ type OrgScopedJobAPI interface {
 	GetJobLocationByOrg(ctx context.Context, org, jobID string) (JobLocation, error)
 }
 
+type orgScopedLogAPI interface {
+	OrgScopedJobAPI
+	LogProvider
+}
+
 // JobLocation holds the identifiers needed for cache keys and pipeline-scoped API calls.
 type JobLocation struct {
 	Org      string
@@ -188,12 +193,16 @@ func jobStatusFromJob(job buildkite.Job) *JobStatus {
 // orgJobReaderAPI adapts OrgScopedJobAPI for the pipeline-scoped BuildkiteAPI interface
 // while preserving org-only fetch semantics and resolved cache identifiers.
 type orgJobReaderAPI struct {
-	base     OrgScopedJobAPI
+	base     orgScopedLogAPI
 	location JobLocation
 }
 
 func (a *orgJobReaderAPI) GetJobLog(ctx context.Context, _, _, _, _ string) (io.ReadCloser, error) {
 	return a.base.GetJobLogByOrg(ctx, a.location.Org, a.location.Job)
+}
+
+func (a *orgJobReaderAPI) JobLogExists(ctx context.Context, _, _, _, _ string) (bool, error) {
+	return a.base.JobLogExists(ctx, a.location.Org, a.location.Pipeline, a.location.Build, a.location.Job)
 }
 
 func (a *orgJobReaderAPI) GetJobStatus(ctx context.Context, _, _, _, _ string) (*JobStatus, error) {

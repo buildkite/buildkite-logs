@@ -23,8 +23,21 @@ type mockBuildkiteAPI struct {
 	logDelay       time.Duration
 	logStarted     chan struct{}
 	statusErr      error
+	logExistsErr   error
+	logMissing     bool
+	getExistsCalls int
 	logErr         error
 	mu             sync.Mutex
+}
+
+func (m *mockBuildkiteAPI) JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.getExistsCalls++
+	if m.logExistsErr != nil {
+		return false, m.logExistsErr
+	}
+	return !m.logMissing, nil
 }
 
 func (m *mockBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
@@ -64,6 +77,12 @@ func (m *mockBuildkiteAPI) calls() (int, int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.getLogCalls, m.getStatusCalls
+}
+
+func (m *mockBuildkiteAPI) existsCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getExistsCalls
 }
 
 func (m *mockBuildkiteAPI) setJobStatus(status *JobStatus) {
@@ -218,13 +237,8 @@ func TestClient_NewReader_CacheHit(t *testing.T) {
 	defer reader1.Close()
 
 	initialLogCalls := mock.getLogCalls
-	blobKey := GenerateBlobKey("org", "pipeline", "123", "job-1")
-	client.statusCache.Store(blobKey, statusCacheEntry{
-		status:    mock.jobStatus,
-		fetchedAt: time.Now().Add(-defaultStatusCacheTTL - time.Second),
-	})
 
-	// The terminal cache remains usable, but access and current status are checked.
+	// The terminal cache remains usable, but current log access is checked.
 	reader2, err := client.NewReader(ctx, "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("second NewReader: %v", err)
@@ -234,8 +248,52 @@ func TestClient_NewReader_CacheHit(t *testing.T) {
 	if mock.getLogCalls != initialLogCalls {
 		t.Errorf("expected no additional log downloads on cache hit, got %d extra calls", mock.getLogCalls-initialLogCalls)
 	}
-	if _, statusCalls := mock.calls(); statusCalls != 2 {
-		t.Errorf("GetJobStatus calls = %d, want 2", statusCalls)
+	if _, statusCalls := mock.calls(); statusCalls != 1 {
+		t.Errorf("GetJobStatus calls = %d, want 1", statusCalls)
+	}
+	if existsCalls := mock.existsCalls(); existsCalls != 1 {
+		t.Errorf("JobLogExists calls = %d, want 1", existsCalls)
+	}
+}
+
+func TestClient_NewReader_RefreshesBlobWithoutMetadata(t *testing.T) {
+	mock := newTerminalMock()
+	client := newTestClient(t, mock)
+	blobKey := GenerateBlobKey("org", "pipeline", "123", "job-1")
+
+	if err := client.blobStorage.WriteWithMetadata(t.Context(), blobKey, []byte("legacy cache data"), nil); err != nil {
+		t.Fatalf("WriteWithMetadata: %v", err)
+	}
+	metadata, err := client.blobStorage.ReadWithMetadata(t.Context(), blobKey)
+	if err != nil {
+		t.Fatalf("ReadWithMetadata before refresh: %v", err)
+	}
+	if metadata != nil {
+		t.Fatalf("metadata before refresh = %#v, want nil", metadata)
+	}
+
+	reader, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	defer reader.Close()
+	if _, err := reader.GetFileInfo(); err != nil {
+		t.Fatalf("GetFileInfo: %v", err)
+	}
+
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 1 {
+		t.Fatalf("GetJobLog calls = %d, want 1", logCalls)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	}
+	metadata, err = client.blobStorage.ReadWithMetadata(t.Context(), blobKey)
+	if err != nil {
+		t.Fatalf("ReadWithMetadata after refresh: %v", err)
+	}
+	if metadata == nil {
+		t.Fatal("metadata after refresh = nil")
 	}
 }
 
@@ -249,18 +307,60 @@ func TestClient_TerminalCacheHit_RequiresJobAccess(t *testing.T) {
 	}
 	defer reader.Close()
 
-	blobKey := GenerateBlobKey("org", "pipeline", "123", "job-1")
-	client.statusCache.Delete(blobKey)
-	mock.statusErr = errors.New("job access denied")
+	mock.logExistsErr = errors.New("job access denied")
 
 	_, err = client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
-	if !errors.Is(err, mock.statusErr) {
-		t.Fatalf("NewReader error = %v, want %v", err, mock.statusErr)
+	if !errors.Is(err, mock.logExistsErr) {
+		t.Fatalf("NewReader error = %v, want %v", err, mock.logExistsErr)
 	}
 
 	logCalls, _ := mock.calls()
 	if logCalls != 1 {
 		t.Fatalf("GetJobLog calls = %d, want 1", logCalls)
+	}
+
+	mock.logExistsErr = nil
+	mock.logMissing = true
+	_, err = client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if !errors.Is(err, ErrJobLogUnavailable) {
+		t.Fatalf("missing log error = %v, want %v", err, ErrJobLogUnavailable)
+	}
+}
+
+func TestClient_SharedCacheHit_UsesCurrentClientIdentity(t *testing.T) {
+	storageURL := "file://" + t.TempDir()
+	authorizedAPI := newTerminalMock()
+	authorizedClient, err := NewClientWithAPI(t.Context(), authorizedAPI, storageURL)
+	if err != nil {
+		t.Fatalf("NewClientWithAPI authorized: %v", err)
+	}
+	defer authorizedClient.Close()
+
+	reader, err := authorizedClient.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("populate shared cache: %v", err)
+	}
+	reader.Close()
+
+	accessDenied := errors.New("job log access denied")
+	unauthorizedAPI := newTerminalMock()
+	unauthorizedAPI.logExistsErr = accessDenied
+	unauthorizedClient, err := NewClientWithAPI(t.Context(), unauthorizedAPI, storageURL)
+	if err != nil {
+		t.Fatalf("NewClientWithAPI unauthorized: %v", err)
+	}
+	defer unauthorizedClient.Close()
+
+	_, err = unauthorizedClient.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if !errors.Is(err, accessDenied) {
+		t.Fatalf("shared cache read error = %v, want %v", err, accessDenied)
+	}
+	logCalls, statusCalls := unauthorizedAPI.calls()
+	if logCalls != 0 || statusCalls != 0 {
+		t.Fatalf("unauthorized API calls: log=%d status=%d, want 0 for both", logCalls, statusCalls)
+	}
+	if existsCalls := unauthorizedAPI.existsCalls(); existsCalls != 1 {
+		t.Fatalf("JobLogExists calls = %d, want 1", existsCalls)
 	}
 }
 
@@ -302,12 +402,15 @@ func TestClient_ConcurrentTTLExpiry_RefreshOnce(t *testing.T) {
 	if logCalls != 2 {
 		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
 	}
-	if statusCalls != 1 {
-		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	if statusCalls != 2 {
+		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+	if existsCalls := mock.existsCalls(); existsCalls != 8 {
+		t.Fatalf("JobLogExists calls = %d, want 8", existsCalls)
 	}
 }
 
-func TestClient_NonTerminalCacheHit_StatusMemoized(t *testing.T) {
+func TestClient_NonTerminalCacheHit_ChecksJobLogAccess(t *testing.T) {
 	mock := &mockBuildkiteAPI{
 		logContent: "\x1b_bk;t=1745322209921\x07running log entry\n",
 		jobStatus:  &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
@@ -330,8 +433,11 @@ func TestClient_NonTerminalCacheHit_StatusMemoized(t *testing.T) {
 	if logCalls != 1 {
 		t.Fatalf("GetJobLog calls = %d, want 1", logCalls)
 	}
-	if statusCalls != 1 {
-		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	if statusCalls != 2 {
+		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+	if existsCalls := mock.existsCalls(); existsCalls != 1 {
+		t.Fatalf("JobLogExists calls = %d, want 1", existsCalls)
 	}
 }
 
@@ -348,12 +454,7 @@ func TestClient_NonTerminalCacheHit_RefreshesWhenStatusBecomesTerminal(t *testin
 		t.Fatalf("first NewReader: %v", err)
 	}
 	defer reader1.Close()
-
 	mock.setJobStatus(&JobStatus{ID: "test-job", State: JobStatePassed, IsTerminal: true})
-	client.statusCache.Store(blobKey, statusCacheEntry{
-		status:    &JobStatus{ID: "test-job", State: JobStateRunning, IsTerminal: false},
-		fetchedAt: time.Now().Add(-defaultStatusCacheTTL - time.Second),
-	})
 
 	reader2, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
 	if err != nil {
@@ -414,8 +515,8 @@ func TestClient_ConcurrentForceRefresh_Coalesces(t *testing.T) {
 	if logCalls != 2 {
 		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
 	}
-	if statusCalls != 1 {
-		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	if statusCalls != 2 {
+		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
 	}
 }
 
@@ -461,8 +562,8 @@ func TestClient_ConcurrentForceAndTTLRefresh_Coalesce(t *testing.T) {
 	if logCalls != 2 {
 		t.Fatalf("GetJobLog calls = %d, want 2", logCalls)
 	}
-	if statusCalls != 1 {
-		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	if statusCalls != 2 {
+		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
 	}
 }
 
@@ -536,6 +637,42 @@ func TestClient_NewReader_JobStatusErrorHook(t *testing.T) {
 	}
 }
 
+func TestClient_NewReader_CustomAPIReturnsNilJobStatus(t *testing.T) {
+	mock := &mockBuildkiteAPI{
+		logContent: "\x1b_bk;t=1745322209921\x07Test log entry\n",
+	}
+	client := newTestClient(t, mock)
+
+	var statusResult *JobStatusResult
+	client.Hooks().AddAfterJobStatus(func(ctx context.Context, result *JobStatusResult) {
+		statusResult = result
+	})
+
+	_, err := client.NewReader(t.Context(), "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err == nil {
+		t.Fatal("NewReader error = nil, want nil job status error")
+	}
+	if !strings.Contains(err.Error(), "API returned nil job status") {
+		t.Fatalf("NewReader error = %q, want nil job status error", err)
+	}
+	logCalls, statusCalls := mock.calls()
+	if logCalls != 0 {
+		t.Fatalf("GetJobLog calls = %d, want 0", logCalls)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("GetJobStatus calls = %d, want 1", statusCalls)
+	}
+	if statusResult == nil {
+		t.Fatal("expected job status hook to fire")
+	}
+	if statusResult.Success {
+		t.Fatal("job status hook reported success for nil status")
+	}
+	if statusResult.Err == nil || !strings.Contains(statusResult.Err.Error(), "API returned nil job status") {
+		t.Fatalf("job status hook error = %v, want nil job status error", statusResult.Err)
+	}
+}
+
 func TestClient_NewReader_LogDownloadStreamErrorHook(t *testing.T) {
 	downloadErr := errors.New("buildkite returned 500")
 	mock := &mockBuildkiteAPI{
@@ -585,6 +722,10 @@ type streamErrorBuildkiteAPI struct {
 
 func (a *streamErrorBuildkiteAPI) GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error) {
 	return a.status, nil
+}
+
+func (a *streamErrorBuildkiteAPI) JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error) {
+	return true, nil
 }
 
 func (a *streamErrorBuildkiteAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {
@@ -844,6 +985,10 @@ type mockRetriedJobAPI struct {
 	logContent       string
 	getLogCalls      int
 	getStatusCalls   int
+}
+
+func (m *mockRetriedJobAPI) JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error) {
+	return true, nil
 }
 
 func (m *mockRetriedJobAPI) GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error) {

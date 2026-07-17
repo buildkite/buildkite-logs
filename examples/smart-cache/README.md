@@ -6,7 +6,7 @@ This example demonstrates smart caching features using the high-level `Client` A
 
 - **High-level Client API** for simplified caching operations
 - **30-second TTL** for non-terminal jobs with automatic refresh
-- **Permanent freshness caching** for terminal jobs, with an authenticated `JobLogExists` check before every cached read
+- **Authenticated access checks** with `JobLogExists` before every request, including cold misses and force refreshes
 - **Force refresh** capability bypassing cache
 - **Multiple storage backends** (file://, s3://, gs://)
 - **Environment-aware defaults** (~/.bklog desktop, /tmp/bklog container)
@@ -59,4 +59,4 @@ go run main.go \
 5. **Different TTL values** and their effects
 6. **Job status-aware caching** behavior
 
-The example shows how the high-level `Client` API caches terminal jobs permanently for freshness while still checking the current API identity before every cached read. Non-terminal jobs refresh based on TTL, with metadata stored in blob attributes. Each example creates separate clients with different storage URLs to demonstrate various caching scenarios.
+The example shows how the high-level `Client` API checks the current API identity before every request can use or join cache work. This includes initial downloads, cache hits, and force refreshes. Terminal jobs are cached permanently for freshness, while non-terminal jobs refresh based on TTL with metadata stored in blob attributes. Each example creates separate clients with different storage URLs to demonstrate various caching scenarios.

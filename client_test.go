@@ -102,10 +102,10 @@ func newTerminalMock() *mockBuildkiteAPI {
 	}
 }
 
-func newTestClient(t *testing.T, mock *mockBuildkiteAPI, opts ...ClientOption) *Client {
+func newTestClient(t *testing.T, api BuildkiteAPI, opts ...ClientOption) *Client {
 	t.Helper()
 	tempDir := t.TempDir()
-	client, err := NewClientWithAPI(t.Context(), mock, "file://"+tempDir, opts...)
+	client, err := NewClientWithAPI(t.Context(), api, "file://"+tempDir, opts...)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -251,8 +251,8 @@ func TestClient_NewReader_CacheHit(t *testing.T) {
 	if _, statusCalls := mock.calls(); statusCalls != 1 {
 		t.Errorf("GetJobStatus calls = %d, want 1", statusCalls)
 	}
-	if existsCalls := mock.existsCalls(); existsCalls != 1 {
-		t.Errorf("JobLogExists calls = %d, want 1", existsCalls)
+	if existsCalls := mock.existsCalls(); existsCalls != 2 {
+		t.Errorf("JobLogExists calls = %d, want 2", existsCalls)
 	}
 }
 
@@ -381,6 +381,49 @@ func TestClient_ConcurrentCacheMiss_SingleFlight(t *testing.T) {
 	}
 }
 
+type requestIdentityKey struct{}
+
+type requestScopedBuildkiteAPI struct {
+	*mockBuildkiteAPI
+}
+
+func (a *requestScopedBuildkiteAPI) JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error) {
+	a.mu.Lock()
+	a.getExistsCalls++
+	a.mu.Unlock()
+	return ctx.Value(requestIdentityKey{}) == "authorized", nil
+}
+
+func TestClient_ConcurrentCacheMiss_RejectsUnauthorizedRequest(t *testing.T) {
+	mock := newTerminalMock()
+	mock.logDelay = 50 * time.Millisecond
+	mock.logStarted = make(chan struct{}, 1)
+	client := newTestClient(t, &requestScopedBuildkiteAPI{mockBuildkiteAPI: mock})
+
+	authorizedCtx := context.WithValue(t.Context(), requestIdentityKey{}, "authorized")
+	unauthorizedCtx := context.WithValue(t.Context(), requestIdentityKey{}, "unauthorized")
+	leaderErr := make(chan error, 1)
+	go func() {
+		reader, err := client.NewReader(authorizedCtx, "org", "pipeline", "123", "job-1", time.Minute, false)
+		if reader != nil {
+			_ = reader.Close()
+		}
+		leaderErr <- err
+	}()
+
+	<-mock.logStarted
+	reader, err := client.NewReader(unauthorizedCtx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	if reader != nil {
+		_ = reader.Close()
+	}
+	if !errors.Is(err, ErrJobLogUnavailable) {
+		t.Fatalf("unauthorized waiter error = %v, want %v", err, ErrJobLogUnavailable)
+	}
+	if err := <-leaderErr; err != nil {
+		t.Fatalf("authorized leader error = %v", err)
+	}
+}
+
 func TestClient_ConcurrentTTLExpiry_RefreshOnce(t *testing.T) {
 	mock := &mockBuildkiteAPI{
 		logContent: "\x1b_bk;t=1745322209921\x07running log entry\n",
@@ -405,8 +448,8 @@ func TestClient_ConcurrentTTLExpiry_RefreshOnce(t *testing.T) {
 	if statusCalls != 2 {
 		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
 	}
-	if existsCalls := mock.existsCalls(); existsCalls != 8 {
-		t.Fatalf("JobLogExists calls = %d, want 8", existsCalls)
+	if existsCalls := mock.existsCalls(); existsCalls != 9 {
+		t.Fatalf("JobLogExists calls = %d, want 9", existsCalls)
 	}
 }
 
@@ -436,8 +479,8 @@ func TestClient_NonTerminalCacheHit_ChecksJobLogAccess(t *testing.T) {
 	if statusCalls != 2 {
 		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
 	}
-	if existsCalls := mock.existsCalls(); existsCalls != 1 {
-		t.Fatalf("JobLogExists calls = %d, want 1", existsCalls)
+	if existsCalls := mock.existsCalls(); existsCalls != 2 {
+		t.Fatalf("JobLogExists calls = %d, want 2", existsCalls)
 	}
 }
 
@@ -517,6 +560,43 @@ func TestClient_ConcurrentForceRefresh_Coalesces(t *testing.T) {
 	}
 	if statusCalls != 2 {
 		t.Fatalf("GetJobStatus calls = %d, want 2", statusCalls)
+	}
+}
+
+func TestClient_ConcurrentForceRefresh_RejectsUnauthorizedRequest(t *testing.T) {
+	mock := newTerminalMock()
+	api := &requestScopedBuildkiteAPI{mockBuildkiteAPI: mock}
+	client := newTestClient(t, api)
+	authorizedCtx := context.WithValue(t.Context(), requestIdentityKey{}, "authorized")
+	unauthorizedCtx := context.WithValue(t.Context(), requestIdentityKey{}, "unauthorized")
+
+	reader, err := client.NewReader(authorizedCtx, "org", "pipeline", "123", "job-1", time.Minute, false)
+	if err != nil {
+		t.Fatalf("populate cache: %v", err)
+	}
+	reader.Close()
+
+	mock.logDelay = 50 * time.Millisecond
+	mock.logStarted = make(chan struct{}, 1)
+	leaderErr := make(chan error, 1)
+	go func() {
+		reader, err := client.NewReader(authorizedCtx, "org", "pipeline", "123", "job-1", time.Minute, true)
+		if reader != nil {
+			_ = reader.Close()
+		}
+		leaderErr <- err
+	}()
+
+	<-mock.logStarted
+	reader, err = client.NewReader(unauthorizedCtx, "org", "pipeline", "123", "job-1", time.Minute, true)
+	if reader != nil {
+		_ = reader.Close()
+	}
+	if !errors.Is(err, ErrJobLogUnavailable) {
+		t.Fatalf("unauthorized waiter error = %v, want %v", err, ErrJobLogUnavailable)
+	}
+	if err := <-leaderErr; err != nil {
+		t.Fatalf("authorized leader error = %v", err)
 	}
 }
 

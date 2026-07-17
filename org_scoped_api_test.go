@@ -103,6 +103,8 @@ func TestOrgScopedJobAPI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == http.MethodHead && strings.HasSuffix(r.URL.Path, "/log"):
+			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/log"):
 			_ = json.NewEncoder(w).Encode(buildkite.JobLog{Content: logContent})
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/jobs/"):

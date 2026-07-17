@@ -114,13 +114,14 @@ type BuildkiteAPI interface {
 }
 ```
 
-`JobLogExists` is an authorization boundary for cached logs. It must check the
-log endpoint using the current caller's API identity without downloading the
-log body. Return `false, nil` when the log does not exist; return an error when
-the access check fails. The client checks this method before every cached read
-and fails closed rather than serving cached content. A false result is returned
-as `ErrJobLogUnavailable`, which intentionally does not distinguish a missing
-log from an inaccessible one.
+`JobLogExists` is the authorization boundary for all log reads. It must check
+the log endpoint using the current caller's API identity without downloading
+the log body. Return `false, nil` when the log does not exist; return an error
+when the access check fails. The client calls this method before every request,
+including cold cache misses and force refreshes, and fails closed before using
+or joining shared cache work. A false result is returned as
+`ErrJobLogUnavailable`, which intentionally does not distinguish a missing log
+from an inaccessible one.
 
 Adding `JobLogExists` is an intentional source-breaking change for custom API
 implementations during the library's `0.x` development. The official adapter
@@ -817,15 +818,15 @@ The library uses a two-tier intelligent caching strategy that optimizes for both
 
 ```mermaid
 flowchart TD
-    A[Start: DownloadAndCache] --> B[Check blob storage cache]
+    A[Start: DownloadAndCache] --> E[HEAD log with JobLogExists]
+    E --> F{Current identity<br/>can access log?}
+    F -->|No| X[Return access error]
+    F -->|Yes| B[Check blob storage cache]
     B --> C{Cache exists?}
     C -->|No| H[Get job status and download logs]
     C -->|Yes| D{Force refresh?}
     D -->|Yes| H
-    D -->|No| E[HEAD log with JobLogExists]
-    E --> F{Current identity<br/>can access log?}
-    F -->|No| X[Return access error]
-    F -->|Yes| G{Cached metadata<br/>is terminal?}
+    D -->|No| G{Cached metadata<br/>is terminal?}
     G -->|Yes| T[Use permanent cache]
     G -->|No| I{Time elapsed < TTL?}
     I -->|No| H
@@ -853,11 +854,11 @@ flowchart TD
 ```
 
 **Caching Strategy:**
-- **Authorization**: Every cached read first calls `JobLogExists` using the current API identity. Missing, inaccessible, or failed checks never serve cached content.
-- **Terminal Jobs**: Once a job completes, logs never change, so cache them without a TTL or status lookup. Authorization is still checked on every read.
+- **Authorization**: Every request first calls `JobLogExists` using the current API identity, including cold cache misses and force refreshes. Missing, inaccessible, or failed checks cannot use or join shared cache work.
+- **Terminal Jobs**: Once a job completes, logs never change, so cache them without a TTL or status lookup. Authorization is still checked on every request.
 - **Running Jobs Within TTL**: Call `GetJobStatus` to detect a terminal transition immediately; otherwise use the cached log.
 - **Running Jobs After TTL**: Refresh the log and persist its latest terminal state. Concurrent refreshes are coalesced.
-- **Force Refresh**: Override cache entirely for debugging or manual refresh scenarios
+- **Force Refresh**: Override cached content after the caller passes the same authorization check
 
 ### Benefits of Parquet Format
 

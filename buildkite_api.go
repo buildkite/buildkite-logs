@@ -12,13 +12,18 @@ import (
 	"github.com/buildkite/go-buildkite/v5"
 )
 
-// JobStatusProvider defines the interface for getting job status
+// JobStatusProvider defines the interface for getting job status.
+// A successful call must return a non-nil JobStatus.
 type JobStatusProvider interface {
 	GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error)
 }
 
-// LogProvider defines the interface for getting job logs
+// LogProvider defines the interface for checking and getting job logs.
+// JobLogExists must check access using the current API identity without
+// downloading the log. It should return false with a nil error when the log
+// does not exist, and return an error when the access check itself fails.
 type LogProvider interface {
+	JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error)
 	GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error)
 }
 
@@ -91,6 +96,20 @@ func (c *BuildkiteAPIClient) GetJobLog(ctx context.Context, org, pipeline, build
 	}()
 
 	return reader, nil
+}
+
+// JobLogExists checks whether the current API identity can access a job log
+// without downloading its contents.
+func (c *BuildkiteAPIClient) JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error) {
+	if c.requireToken && c.apiToken == "" {
+		return false, fmt.Errorf("missing Buildkite API token")
+	}
+
+	exists, _, err := c.client.Jobs.JobLogExists(ctx, org, pipeline, build, job)
+	if err != nil {
+		return false, fmt.Errorf("failed to check job log: %w", err)
+	}
+	return exists, nil
 }
 
 // GetJobStatus gets the current status of a job

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/buildkite/buildkite-logs/logparser"
@@ -17,10 +16,12 @@ import (
 // ErrLogTooLarge is returned when a job log exceeds the configured maximum size.
 var ErrLogTooLarge = errors.New("log exceeds maximum allowed size")
 
+// ErrJobLogUnavailable is returned when the current API identity cannot access
+// a cached job log. Buildkite may use a not-found response to conceal access.
+var ErrJobLogUnavailable = errors.New("job log does not exist or is not accessible")
+
 // DefaultMaxLogBytes is the default maximum log size (10MB).
 const DefaultMaxLogBytes int64 = 10 * 1024 * 1024
-
-const defaultStatusCacheTTL = 5 * time.Second
 
 // ClientOption configures a Client.
 type ClientOption func(*Client)
@@ -155,14 +156,7 @@ type Client struct {
 	hooks         *Hooks
 	maxLogBytes   int64 // 0 means no limit
 	refreshGroup  singleflight.Group
-	statusGroup   singleflight.Group
-	statusCache   sync.Map // map[string]statusCacheEntry
 	parserOptions []logparser.Option
-}
-
-type statusCacheEntry struct {
-	status    *JobStatus
-	fetchedAt time.Time
 }
 
 // NewClient creates a new Client using the provided go-buildkite client
@@ -223,7 +217,7 @@ func (c *Client) NewReader(ctx context.Context, org, pipeline, build, job string
 // Pipeline and build identifiers are resolved from the job's build_url so cache keys remain
 // compatible with pipeline-scoped readers.
 func (c *Client) NewReaderByJobID(ctx context.Context, org, job string, ttl time.Duration, forceRefresh bool) (*ParquetReader, error) {
-	scoped, ok := c.api.(OrgScopedJobAPI)
+	scoped, ok := c.api.(orgScopedLogAPI)
 	if !ok {
 		return nil, fmt.Errorf("API client does not support organization-scoped job access")
 	}
@@ -277,10 +271,18 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 		return "", fmt.Errorf("failed to check blob existence: %w", err)
 	}
 
+	var jobStatus *JobStatus
+	cacheChecked := false
 	if exists && !forceRefresh {
-		if usable, err := c.cacheUsable(ctx, api, org, pipeline, build, job, blobKey, ttl); err == nil && usable {
+		var usable bool
+		jobStatus, usable, err = c.checkCachedJobLog(ctx, api, org, pipeline, build, job, blobKey, ttl)
+		if err != nil {
+			return "", fmt.Errorf("failed to validate cached job log access: %w", err)
+		}
+		if usable {
 			return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
 		}
+		cacheChecked = true
 	}
 
 	// Decouple shared refresh work from the single caller that wins the
@@ -289,11 +291,30 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 	inflightKey := blobKey
 	ch := c.refreshGroup.DoChan(inflightKey, func() (any, error) {
 		if !forceRefresh {
-			if usable, err := c.cacheUsable(refreshCtx, api, org, pipeline, build, job, blobKey, ttl); err == nil && usable {
-				return nil, nil
+			exists, err := c.blobStorage.Exists(refreshCtx, blobKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to recheck blob existence: %w", err)
+			}
+			if exists {
+				var usable bool
+				if !cacheChecked {
+					jobStatus, usable, err = c.checkCachedJobLog(refreshCtx, api, org, pipeline, build, job, blobKey, ttl)
+					if err != nil {
+						return nil, fmt.Errorf("failed to validate cached job log access: %w", err)
+					}
+				} else {
+					metadata, err := c.blobStorage.ReadWithMetadata(refreshCtx, blobKey)
+					if err != nil {
+						return nil, fmt.Errorf("failed to recheck cached job log metadata: %w", err)
+					}
+					usable = cacheMetadataUsable(metadata, jobStatus, ttl)
+				}
+				if usable {
+					return nil, nil
+				}
 			}
 		}
-		return nil, c.refreshBlobCache(refreshCtx, api, org, pipeline, build, job, ttl, blobKey)
+		return nil, c.refreshBlobCache(refreshCtx, api, org, pipeline, build, job, ttl, blobKey, jobStatus)
 	})
 
 	select {
@@ -308,78 +329,64 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 	return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
 }
 
-func (c *Client) cacheUsable(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job, blobKey string, ttl time.Duration) (bool, error) {
+func (c *Client) checkCachedJobLog(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job, blobKey string, ttl time.Duration) (*JobStatus, bool, error) {
 	metadata, err := c.blobStorage.ReadWithMetadata(ctx, blobKey)
 	if err != nil || metadata == nil {
-		return false, err
+		return nil, false, err
 	}
 
-	status, err := c.getJobStatusMemoized(ctx, api, org, pipeline, build, job, blobKey)
+	exists, err := api.JobLogExists(ctx, org, pipeline, build, job)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	if metadata.IsTerminal && status.IsTerminal {
-		return true, nil
+	if !exists {
+		return nil, false, ErrJobLogUnavailable
 	}
-	if status.IsTerminal {
-		return false, nil
+	if metadata.IsTerminal {
+		return nil, true, nil
+	}
+	if time.Since(metadata.CachedAt) > ttl {
+		return nil, false, nil
 	}
 
-	return time.Since(metadata.CachedAt) <= ttl, nil
+	status, err := c.getJobStatus(ctx, api, org, pipeline, build, job)
+	if err != nil {
+		return nil, false, err
+	}
+	return status, cacheMetadataUsable(metadata, status, ttl), nil
 }
 
-func (c *Client) getJobStatusMemoized(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job, blobKey string) (*JobStatus, error) {
-	if entry, ok := c.loadCachedJobStatus(blobKey); ok {
-		return entry.status, nil
+func cacheMetadataUsable(metadata *BlobMetadata, status *JobStatus, ttl time.Duration) bool {
+	if metadata == nil {
+		return false
 	}
+	if metadata.IsTerminal {
+		return true
+	}
+	if time.Since(metadata.CachedAt) > ttl {
+		return false
+	}
+	return status == nil || !status.IsTerminal
+}
 
-	result, err, _ := c.statusGroup.Do(blobKey, func() (any, error) {
-		if entry, ok := c.loadCachedJobStatus(blobKey); ok {
-			return entry.status, nil
-		}
+func (c *Client) getJobStatus(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string) (*JobStatus, error) {
+	jobStatusStart := time.Now()
+	jobStatus, err := api.GetJobStatus(ctx, org, pipeline, build, job)
+	if err == nil && jobStatus == nil {
+		err = errors.New("API returned nil job status")
+	}
+	jobStatusDuration := time.Since(jobStatusStart)
+	c.fireJobStatusHook(ctx, org, pipeline, build, job, jobStatusDuration, jobStatus, err)
+	return jobStatus, err
+}
 
-		jobStatusStart := time.Now()
-		jobStatus, err := api.GetJobStatus(ctx, org, pipeline, build, job)
-		jobStatusDuration := time.Since(jobStatusStart)
-		c.fireJobStatusHook(ctx, org, pipeline, build, job, jobStatusDuration, jobStatus, err)
+func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string, ttl time.Duration, blobKey string, jobStatus *JobStatus) error {
+	if jobStatus == nil {
+		var err error
+		jobStatus, err = c.getJobStatus(ctx, api, org, pipeline, build, job)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("failed to get job status: %w", err)
 		}
-
-		c.statusCache.Store(blobKey, statusCacheEntry{
-			status:    jobStatus,
-			fetchedAt: time.Now(),
-		})
-		return jobStatus, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	status, ok := result.(*JobStatus)
-	if !ok || status == nil {
-		return nil, fmt.Errorf("memoized job status had unexpected type %T", result)
-	}
-	return status, nil
-}
-
-func (c *Client) loadCachedJobStatus(blobKey string) (statusCacheEntry, bool) {
-	value, ok := c.statusCache.Load(blobKey)
-	if !ok {
-		return statusCacheEntry{}, false
-	}
-	entry, ok := value.(statusCacheEntry)
-	if !ok || time.Since(entry.fetchedAt) > defaultStatusCacheTTL {
-		c.statusCache.Delete(blobKey)
-		return statusCacheEntry{}, false
-	}
-	return entry, true
-}
-
-func (c *Client) refreshBlobCache(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string, ttl time.Duration, blobKey string) error {
-	jobStatus, err := c.getJobStatusMemoized(ctx, api, org, pipeline, build, job, blobKey)
-	if err != nil {
-		return fmt.Errorf("failed to get job status: %w", err)
 	}
 
 	logDownloadStart := time.Now()

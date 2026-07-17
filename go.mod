@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/apache/arrow-go/v18 v18.6.0
-	github.com/buildkite/go-buildkite/v5 v5.5.0
+	github.com/buildkite/go-buildkite/v5 v5.6.0
 	gocloud.dev v0.46.0
 	golang.org/x/sync v0.22.0
 )

@@ -104,6 +104,28 @@ The `Client` provides:
 - **Parameter validation**: Built-in validation with descriptive error messages
 - **Hooks System**: Optional hooks for observability and tracing without coupling to specific frameworks
 
+Custom `BuildkiteAPI` implementations must provide all three operations:
+
+```go
+type BuildkiteAPI interface {
+    GetJobStatus(ctx context.Context, org, pipeline, build, job string) (*JobStatus, error)
+    JobLogExists(ctx context.Context, org, pipeline, build, job string) (bool, error)
+    GetJobLog(ctx context.Context, org, pipeline, build, job string) (io.ReadCloser, error)
+}
+```
+
+`JobLogExists` is an authorization boundary for cached logs. It must check the
+log endpoint using the current caller's API identity without downloading the
+log body. Return `false, nil` when the log does not exist; return an error when
+the access check fails. The client checks this method before every cached read
+and fails closed rather than serving cached content. A false result is returned
+as `ErrJobLogUnavailable`, which intentionally does not distinguish a missing
+log from an inaccessible one.
+
+Adding `JobLogExists` is an intentional source-breaking change for custom API
+implementations during the library's `0.x` development. The official adapter
+uses `JobLogExists` from `github.com/buildkite/go-buildkite/v5` v5.6.0 or later.
+
 For detailed documentation, see [docs/client-api.md](docs/client-api.md). For a complete working example, see [examples/high-level-client/](examples/high-level-client/).
 
 ## CLI Tools (Development & Debugging)
@@ -797,19 +819,24 @@ The library uses a two-tier intelligent caching strategy that optimizes for both
 flowchart TD
     A[Start: DownloadAndCache] --> B[Check blob storage cache]
     B --> C{Cache exists?}
-    C -->|No| H[Download logs from API]
+    C -->|No| H[Get job status and download logs]
     C -->|Yes| D{Force refresh?}
     D -->|Yes| H
-    D -->|No| E[Get job status]
-    E --> F{Job is terminal?}
-    F -->|Yes| G[Use cache immediately<br/>Terminal jobs never expire]
-    F -->|No| I{Time elapsed < TTL?}
-    I -->|Yes| J[Use cache<br/>Within TTL window]
+    D -->|No| E[HEAD log with JobLogExists]
+    E --> F{Current identity<br/>can access log?}
+    F -->|No| X[Return access error]
+    F -->|Yes| G{Cached metadata<br/>is terminal?}
+    G -->|Yes| T[Use permanent cache]
+    G -->|No| I{Time elapsed < TTL?}
     I -->|No| H
+    I -->|Yes| P[Get current job status]
+    P --> Q{Job is terminal?}
+    Q -->|Yes| H
+    Q -->|No| J[Use cache within TTL]
     H --> K[Parse logs to Parquet]
     K --> L[Store in blob storage with metadata]
     L --> M[Create local cache file]
-    G --> N[Create local cache file]
+    T --> N[Create local cache file]
     J --> N
     M --> O[Return local file path]
     N --> O
@@ -819,15 +846,17 @@ flowchart TD
     classDef download fill:#7c2d12,stroke:#fb923c,color:#ffffff
     classDef decision fill:#374151,stroke:#9ca3af,color:#ffffff
 
-    class G,F terminal
-    class B,C,I,J,N cache
+    class G,Q terminal
+    class B,C,I,J,T,N cache
     class H,K,L,M download
-    class D,E decision
+    class D,E,F,P decision
 ```
 
 **Caching Strategy:**
-- **Terminal Jobs**: Once a job completes, logs never change → cache forever (no TTL check)
-- **Running Jobs**: Logs may still be updated → respect TTL to ensure fresh data
+- **Authorization**: Every cached read first calls `JobLogExists` using the current API identity. Missing, inaccessible, or failed checks never serve cached content.
+- **Terminal Jobs**: Once a job completes, logs never change, so cache them without a TTL or status lookup. Authorization is still checked on every read.
+- **Running Jobs Within TTL**: Call `GetJobStatus` to detect a terminal transition immediately; otherwise use the cached log.
+- **Running Jobs After TTL**: Refresh the log and persist its latest terminal state. Concurrent refreshes are coalesced.
 - **Force Refresh**: Override cache entirely for debugging or manual refresh scenarios
 
 ### Benefits of Parquet Format

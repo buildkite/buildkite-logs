@@ -394,7 +394,7 @@ func (a *requestScopedBuildkiteAPI) JobLogExists(ctx context.Context, org, pipel
 	return ctx.Value(requestIdentityKey{}) == "authorized", nil
 }
 
-func TestClient_ConcurrentCacheMiss_ValidatesWaiterIdentity(t *testing.T) {
+func TestClient_ConcurrentCacheMiss_RejectsUnauthorizedRequest(t *testing.T) {
 	mock := newTerminalMock()
 	mock.logDelay = 50 * time.Millisecond
 	mock.logStarted = make(chan struct{}, 1)
@@ -563,7 +563,7 @@ func TestClient_ConcurrentForceRefresh_Coalesces(t *testing.T) {
 	}
 }
 
-func TestClient_ConcurrentForceRefresh_ValidatesWaiterIdentity(t *testing.T) {
+func TestClient_ConcurrentForceRefresh_RejectsUnauthorizedRequest(t *testing.T) {
 	mock := newTerminalMock()
 	api := &requestScopedBuildkiteAPI{mockBuildkiteAPI: mock}
 	client := newTestClient(t, api)

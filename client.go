@@ -273,12 +273,14 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 
 	var jobStatus *JobStatus
 	cacheChecked := false
+	accessValidated := false
 	if exists && !forceRefresh {
 		var usable bool
 		jobStatus, usable, err = c.checkCachedJobLog(ctx, api, org, pipeline, build, job, blobKey, ttl)
 		if err != nil {
 			return "", fmt.Errorf("failed to validate cached job log access: %w", err)
 		}
+		accessValidated = true
 		if usable {
 			return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
 		}
@@ -302,6 +304,7 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 					if err != nil {
 						return nil, fmt.Errorf("failed to validate cached job log access: %w", err)
 					}
+					accessValidated = true
 				} else {
 					metadata, err := c.blobStorage.ReadWithMetadata(refreshCtx, blobKey)
 					if err != nil {
@@ -326,21 +329,25 @@ func (c *Client) downloadAndCacheWithBlobStorage(ctx context.Context, api Buildk
 		}
 	}
 
+	// The shared refresh may have run with another caller's API identity.
+	// Validate this caller independently before serving the refreshed blob.
+	if !accessValidated {
+		if err := validateJobLogAccess(ctx, api, org, pipeline, build, job); err != nil {
+			return "", fmt.Errorf("failed to validate refreshed job log access: %w", err)
+		}
+	}
+
 	return c.createLocalCacheFileWithHooks(ctx, org, pipeline, build, job, blobKey)
 }
 
 func (c *Client) checkCachedJobLog(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job, blobKey string, ttl time.Duration) (*JobStatus, bool, error) {
-	metadata, err := c.blobStorage.ReadWithMetadata(ctx, blobKey)
-	if err != nil || metadata == nil {
+	if err := validateJobLogAccess(ctx, api, org, pipeline, build, job); err != nil {
 		return nil, false, err
 	}
 
-	exists, err := api.JobLogExists(ctx, org, pipeline, build, job)
-	if err != nil {
+	metadata, err := c.blobStorage.ReadWithMetadata(ctx, blobKey)
+	if err != nil || metadata == nil {
 		return nil, false, err
-	}
-	if !exists {
-		return nil, false, ErrJobLogUnavailable
 	}
 	if metadata.IsTerminal {
 		return nil, true, nil
@@ -354,6 +361,17 @@ func (c *Client) checkCachedJobLog(ctx context.Context, api BuildkiteAPI, org, p
 		return nil, false, err
 	}
 	return status, cacheMetadataUsable(metadata, status, ttl), nil
+}
+
+func validateJobLogAccess(ctx context.Context, api BuildkiteAPI, org, pipeline, build, job string) error {
+	exists, err := api.JobLogExists(ctx, org, pipeline, build, job)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrJobLogUnavailable
+	}
+	return nil
 }
 
 func cacheMetadataUsable(metadata *BlobMetadata, status *JobStatus, ttl time.Duration) bool {

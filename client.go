@@ -17,7 +17,7 @@ import (
 var ErrLogTooLarge = errors.New("log exceeds maximum allowed size")
 
 // ErrJobLogUnavailable is returned when the current API identity cannot access
-// a cached job log. Buildkite may use a not-found response to conceal access.
+// a job log. Buildkite may use a not-found response to conceal access.
 var ErrJobLogUnavailable = errors.New("job log does not exist or is not accessible")
 
 // DefaultMaxLogBytes is the default maximum log size (10MB).

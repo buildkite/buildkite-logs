@@ -274,6 +274,36 @@ func TestParquetLogEntryCleanMethods(t *testing.T) {
 			wantContent: "single line output",
 			wantGroup:   "group",
 		},
+		{
+			name: "trailing carriage return keeps visible text",
+			entry: ParquetLogEntry{
+				Content: "Receiving objects:  99% (162/163)\r",
+				Group:   "clone",
+			},
+			stripANSI:   false,
+			wantContent: "Receiving objects:  99% (162/163)",
+			wantGroup:   "clone",
+		},
+		{
+			name: "carriage return followed by erase sequence keeps visible text",
+			entry: ParquetLogEntry{
+				Content: "Receiving objects: 100% (163/163), done.\r\x1b[K",
+				Group:   "clone",
+			},
+			stripANSI:   true,
+			wantContent: "Receiving objects: 100% (163/163), done.",
+			wantGroup:   "clone",
+		},
+		{
+			name: "only carriage returns and whitespace collapses to empty",
+			entry: ParquetLogEntry{
+				Content: "\r \r\t\r",
+				Group:   "",
+			},
+			stripANSI:   false,
+			wantContent: "",
+			wantGroup:   "",
+		},
 	}
 
 	for _, tt := range tests {

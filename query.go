@@ -45,10 +45,24 @@ func (entry *ParquetLogEntry) CleanContent(stripANSI bool) string {
 	if stripANSI {
 		content = StripANSI(content)
 	}
-	if idx := strings.LastIndex(content, "\r"); idx >= 0 {
-		content = content[idx+1:]
+	return strings.TrimSpace(collapseCarriageReturns(content))
+}
+
+// collapseCarriageReturns keeps the last segment of a \r-overwritten line that
+// still has visible content. A terminal only replaces text when new characters
+// are written after the \r, so a line ending in \r (or \r followed by nothing
+// but erased sequences) keeps its previous text rather than becoming blank.
+func collapseCarriageReturns(content string) string {
+	if !strings.Contains(content, "\r") {
+		return content
 	}
-	return strings.TrimSpace(content)
+	segments := strings.Split(content, "\r")
+	for i := len(segments) - 1; i >= 0; i-- {
+		if strings.TrimSpace(segments[i]) != "" {
+			return segments[i]
+		}
+	}
+	return ""
 }
 
 // CleanGroup returns the group name with optional ANSI stripping and whitespace trimming

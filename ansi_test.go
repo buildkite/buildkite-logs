@@ -244,6 +244,36 @@ func TestParquetLogEntryCleanMethods(t *testing.T) {
 			wantContent: "2023-01-01 12:00:00 [INFO] Starting build",
 			wantGroup:   "Test Group",
 		},
+		{
+			name: "progress bar collapses to final state",
+			entry: ParquetLogEntry{
+				Content: "Downloading 10%\rDownloading 50%\rDownloading 100%",
+				Group:   "downloads",
+			},
+			stripANSI:   false,
+			wantContent: "Downloading 100%",
+			wantGroup:   "downloads",
+		},
+		{
+			name: "progress bar with ansi collapses to final state",
+			entry: ParquetLogEntry{
+				Content: "\x1b[32mDone 10%\x1b[0m\r\x1b[32mDone 50%\x1b[0m\r\x1b[32mDone 100%\x1b[0m",
+				Group:   "downloads",
+			},
+			stripANSI:   true,
+			wantContent: "Done 100%",
+			wantGroup:   "downloads",
+		},
+		{
+			name: "no carriage return is unchanged",
+			entry: ParquetLogEntry{
+				Content: "single line output",
+				Group:   "group",
+			},
+			stripANSI:   false,
+			wantContent: "single line output",
+			wantGroup:   "group",
+		},
 	}
 
 	for _, tt := range tests {

@@ -37,11 +37,16 @@ func (entry *ParquetLogEntry) IsGroup() bool {
 	return entry.Flags.IsGroup()
 }
 
-// CleanContent returns the content with optional ANSI stripping and whitespace trimming
+// CleanContent returns the content with optional ANSI stripping and whitespace trimming.
+// Carriage-return overwrites (\r) are collapsed to their final visible state, matching
+// what a terminal renders for progress-bar output.
 func (entry *ParquetLogEntry) CleanContent(stripANSI bool) string {
 	content := entry.Content
 	if stripANSI {
 		content = StripANSI(content)
+	}
+	if idx := strings.LastIndex(content, "\r"); idx >= 0 {
+		content = content[idx+1:]
 	}
 	return strings.TrimSpace(content)
 }

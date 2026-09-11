@@ -2,7 +2,9 @@ package buildkitelogs
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -121,6 +123,16 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 		}
 	})
 
+	t.Run("SeekBeforeBeginning", func(t *testing.T) {
+		for _, err := range reader.SeekToRow(t.Context(), -1) {
+			if err == nil {
+				t.Fatal("SeekToRow(-1) returned an entry")
+			}
+			return
+		}
+		t.Fatal("SeekToRow(-1) returned neither an error nor an entry")
+	})
+
 	t.Run("SeekWithEarlyTermination", func(t *testing.T) {
 		entryCount := 0
 		targetCount := 3
@@ -140,6 +152,50 @@ func TestParquetReader_SeekToRow(t *testing.T) {
 			t.Errorf("Expected exactly %d entries, got %d", targetCount, entryCount)
 		}
 	})
+}
+
+func TestParquetReader_SeekToRowStopsAfterCancellation(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "cancel.parquet")
+	file, err := os.Create(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writer, err := NewParquetWriter(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteBatch(makeTestEntries(5001)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	entries := 0
+	gotCancellation := false
+	for _, err := range NewParquetReader(filename).SeekToRow(ctx, 0) {
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("SeekToRow() error = %v, want context cancellation", err)
+			}
+			gotCancellation = true
+			break
+		}
+		entries++
+		if entries == 5000 {
+			cancel()
+		}
+	}
+
+	if entries != 5000 {
+		t.Fatalf("SeekToRow() yielded %d entries before cancellation, want 5000", entries)
+	}
+	if !gotCancellation {
+		t.Fatal("SeekToRow() did not return context cancellation")
+	}
 }
 
 func TestReadParquetFileFromRowIter_Standalone(t *testing.T) {

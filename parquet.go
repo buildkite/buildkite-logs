@@ -1,6 +1,7 @@
 package buildkitelogs
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -15,15 +16,29 @@ import (
 	"github.com/buildkite/buildkite-logs/logparser"
 )
 
-func createNewFileWriter(schema *arrow.Schema, w io.Writer, pool memory.Allocator) (*pqarrow.FileWriter, error) {
+func createNewFileWriter(schema *arrow.Schema, w io.Writer, pool memory.Allocator) (writer *pqarrow.FileWriter, err error) {
+	// Arrow v18.6.0 panics instead of returning initial sink write failures.
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			return
+		}
+		if recovered == "failed to write magic number" {
+			writer = nil
+			err = fmt.Errorf("failed to initialize Parquet output: %v", recovered)
+			return
+		}
+		panic(recovered)
+	}()
+
 	// Create Parquet writer
-	writer, err := pqarrow.NewFileWriter(schema, w,
+	writer, err = pqarrow.NewFileWriter(schema, w,
 		parquet.NewWriterProperties(
 			parquet.WithCompression(compress.Codecs.Zstd),
+			parquet.WithAllocator(pool),
 		),
 		pqarrow.NewArrowWriterProperties(
 			pqarrow.WithAllocator(pool),
-			pqarrow.WithCoerceTimestamps(arrow.Millisecond),
 		),
 	)
 	if err != nil {
@@ -78,8 +93,8 @@ func (pw *ParquetWriter) createRecord(entries []*logparser.Entry) arrow.RecordBa
 // ParquetWriter provides streaming Parquet writing capabilities
 type ParquetWriter struct {
 	writer *pqarrow.FileWriter
-	pool   memory.Allocator
 	schema *arrow.Schema
+	closed bool
 
 	// Persistent builders for string encoding
 	timestampBuilder *array.Int64Builder
@@ -110,7 +125,6 @@ func newParquetWriterWithPool(w io.Writer, pool memory.Allocator) (*ParquetWrite
 
 	return &ParquetWriter{
 		writer: writer,
-		pool:   pool,
 		schema: schema,
 
 		// Initialize builders for string encoding
@@ -123,6 +137,9 @@ func newParquetWriterWithPool(w io.Writer, pool memory.Allocator) (*ParquetWrite
 
 // WriteBatch writes a batch of log entries to the Parquet file
 func (pw *ParquetWriter) WriteBatch(entries []*logparser.Entry) error {
+	if pw.closed {
+		return errors.New("cannot write to closed Parquet writer")
+	}
 	if len(entries) == 0 {
 		return nil
 	}
@@ -135,6 +152,11 @@ func (pw *ParquetWriter) WriteBatch(entries []*logparser.Entry) error {
 
 // Close closes the Parquet writer
 func (pw *ParquetWriter) Close() error {
+	if pw.closed {
+		return nil
+	}
+	pw.closed = true
+
 	// Release all builders
 	pw.timestampBuilder.Release()
 	pw.contentBuilder.Release()
@@ -173,16 +195,17 @@ func ExportSeq2ToParquetWriter(seq iter.Seq2[*logparser.Entry, error], w io.Writ
 }
 
 // ExportSeq2ToParquetWriterWithFilter exports filtered log entries to any io.Writer.
-func ExportSeq2ToParquetWriterWithFilter(seq iter.Seq2[*logparser.Entry, error], w io.Writer, filterFunc func(*logparser.Entry) bool) (int, error) {
+func ExportSeq2ToParquetWriterWithFilter(seq iter.Seq2[*logparser.Entry, error], w io.Writer, filterFunc func(*logparser.Entry) bool) (rows int, err error) {
 	writer, err := NewParquetWriterForWriter(w)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = writer.Close() }()
+	defer func() {
+		err = errors.Join(err, writer.Close())
+	}()
 
 	const batchSize = 1000
 	batch := make([]*logparser.Entry, 0, batchSize)
-	rows := 0
 
 	for entry, err := range seq {
 		if err != nil {

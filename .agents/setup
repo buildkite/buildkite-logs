@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mise_bin="$HOME/.local/bin/mise"
+
+mkdir -p "$HOME/.local/bin"
+
+if [[ ! -x "$mise_bin" ]]; then
+	echo "Installing mise..."
+	time curl -fsSL https://mise.run | MISE_INSTALL_PATH="$mise_bin" sh
+fi
+
+echo "Installing locked Go toolchain..."
+time "$mise_bin" install --locked --cd "$repo_root"
+
+# Keep repository tools available to Amp and other non-interactive login shells
+# without requiring mise shell activation.
+ln -sfn "$("$mise_bin" which --cd "$repo_root" go)" "$HOME/.local/bin/go"
+ln -sfn "$("$mise_bin" which --cd "$repo_root" golangci-lint)" "$HOME/.local/bin/golangci-lint"
+
+profile_marker="# buildkite-logs orb tools"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+	cat >> "$HOME/.bash_profile" <<'EOF'
+
+# buildkite-logs orb tools
+case ":$PATH:" in
+	*":$HOME/.local/bin:"*) ;;
+	*) export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+EOF
+fi
+
+echo "Downloading Go modules..."
+time "$mise_bin" exec --cd "$repo_root" -- go mod download
+
+echo "Orb setup complete."

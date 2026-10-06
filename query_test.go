@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/buildkite/buildkite-logs/logparser"
 )
 
@@ -328,6 +329,37 @@ func TestReadParquetFileIterNotFound(t *testing.T) {
 
 	if entryCount > 0 {
 		t.Error("Expected error for non-existent file, but got entries")
+	}
+}
+
+func TestMapColumnsRejectsIncompatibleTypes(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields []arrow.Field
+	}{
+		{
+			name: "timestamp",
+			fields: []arrow.Field{
+				{Name: "timestamp", Type: arrow.BinaryTypes.String},
+				{Name: "content", Type: arrow.BinaryTypes.String},
+			},
+		},
+		{
+			name: "optional group",
+			fields: []arrow.Field{
+				{Name: "timestamp", Type: arrow.PrimitiveTypes.Int64},
+				{Name: "content", Type: arrow.BinaryTypes.String},
+				{Name: "group", Type: arrow.PrimitiveTypes.Int32},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := mapColumns(arrow.NewSchema(test.fields, nil)); err == nil {
+				t.Fatal("mapColumns() accepted an incompatible column type")
+			}
+		})
 	}
 }
 

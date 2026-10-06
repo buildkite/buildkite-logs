@@ -11,3 +11,4 @@ dist/
 /PRD
 /docs
 /*.csv
+.amp/portals/*

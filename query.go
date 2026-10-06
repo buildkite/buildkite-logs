@@ -219,8 +219,11 @@ func readParquetFileStreamingIter(ctx context.Context, filename string, batchSiz
 		}
 		resources = append(resources, func() { recordReader.Release() })
 
-		// Get schema from the first record peek or metadata
-		var columnIndices *columnMapping
+		columnIndices, err := mapColumns(recordReader.Schema())
+		if err != nil {
+			yield(ParquetLogEntry{}, err)
+			return
+		}
 		currentRowPosition := int64(0) // Track current position from start of file
 
 		// Stream records in batches
@@ -240,23 +243,11 @@ func readParquetFileStreamingIter(ctx context.Context, filename string, batchSiz
 				return
 			}
 
-			// Initialize column mapping on first record
-			if columnIndices == nil {
-				columnIndices, err = mapColumns(record.Schema())
-				if err != nil {
-					record.Release()
-					yield(ParquetLogEntry{}, err)
-					return
-				}
-			}
-
-			// Capture row count before releasing the record
+			// Capture row count before advancing the reader.
 			batchRows := record.NumRows()
 
-			// Process record batch with immediate cleanup and row tracking
+			// Process the borrowed record batch before advancing the reader.
 			shouldContinue := func() bool {
-				defer record.Release()
-
 				// Convert record to entries using streaming iterator with current row position
 				for entry, err := range convertRecordToEntriesIterStreaming(record, columnIndices, currentRowPosition) {
 					if !yield(entry, err) {
@@ -290,12 +281,24 @@ func mapColumns(schema *arrow.Schema) (*columnMapping, error) {
 	for i, field := range schema.Fields() {
 		switch field.Name {
 		case "timestamp":
+			if field.Type.ID() != arrow.INT64 {
+				return nil, fmt.Errorf("unexpected timestamp column type: %s", field.Type)
+			}
 			mapping.timestampIdx = i
 		case "content":
+			if field.Type.ID() != arrow.STRING && field.Type.ID() != arrow.BINARY {
+				return nil, fmt.Errorf("unexpected content column type: %s", field.Type)
+			}
 			mapping.contentIdx = i
 		case "group":
+			if field.Type.ID() != arrow.STRING && field.Type.ID() != arrow.BINARY {
+				return nil, fmt.Errorf("unexpected group column type: %s", field.Type)
+			}
 			mapping.groupIdx = i
 		case "flags":
+			if field.Type.ID() != arrow.INT32 {
+				return nil, fmt.Errorf("unexpected flags column type: %s", field.Type)
+			}
 			mapping.flagsIdx = i
 		}
 	}
@@ -480,6 +483,10 @@ func readParquetFileFromRowIter(ctx context.Context, filename string, startRow i
 
 		// Check if startRow is valid
 		totalRows := pf.MetaData().GetNumRows()
+		if startRow < 0 {
+			yield(ParquetLogEntry{}, fmt.Errorf("start row must not be negative: %d", startRow))
+			return
+		}
 		if startRow >= totalRows {
 			yield(ParquetLogEntry{}, fmt.Errorf("start row %d is beyond file bounds (total rows: %d)", startRow, totalRows))
 			return
@@ -502,6 +509,12 @@ func readParquetFileFromRowIter(ctx context.Context, filename string, startRow i
 		}
 		resources = append(resources, func() { recordReader.Release() })
 
+		columnIndices, err := mapColumns(recordReader.Schema())
+		if err != nil {
+			yield(ParquetLogEntry{}, err)
+			return
+		}
+
 		// Use Arrow's built-in SeekToRow for efficient seeking
 		if startRow > 0 {
 			if err := recordReader.SeekToRow(startRow); err != nil {
@@ -510,12 +523,15 @@ func readParquetFileFromRowIter(ctx context.Context, filename string, startRow i
 			}
 		}
 
-		// Get schema for column mapping
-		var columnIndices *columnMapping
 		currentRowPosition := startRow // Track current position in the file
 
 		// Stream records in batches starting from the seek position
 		for {
+			if err := ctx.Err(); err != nil {
+				yield(ParquetLogEntry{}, err)
+				return
+			}
+
 			record, err := recordReader.Read()
 			if err != nil {
 				if err == io.EOF {
@@ -525,23 +541,11 @@ func readParquetFileFromRowIter(ctx context.Context, filename string, startRow i
 				return
 			}
 
-			// Initialize column mapping on first record
-			if columnIndices == nil {
-				columnIndices, err = mapColumns(record.Schema())
-				if err != nil {
-					record.Release()
-					yield(ParquetLogEntry{}, err)
-					return
-				}
-			}
-
-			// Capture row count before releasing the record
+			// Capture row count before advancing the reader.
 			batchRows := record.NumRows()
 
-			// Process all entries in this record batch with row tracking
+			// Process the borrowed record batch before advancing the reader.
 			shouldContinue := func() bool {
-				defer record.Release()
-
 				// Convert record to entries using streaming iterator with current row position
 				for entry, err := range convertRecordToEntriesIterStreaming(record, columnIndices, currentRowPosition) {
 					if !yield(entry, err) {

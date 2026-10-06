@@ -3,6 +3,7 @@ package buildkitelogs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,23 @@ import (
 
 	"github.com/buildkite/buildkite-logs/logparser"
 )
+
+type closeErrorWriter struct {
+	bytes.Buffer
+	err error
+}
+
+func (w *closeErrorWriter) Close() error {
+	return w.err
+}
+
+type writeErrorWriter struct {
+	err error
+}
+
+func (w *writeErrorWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
 
 func TestParquetWriter(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "test_writer.parquet")
@@ -69,6 +87,43 @@ func TestParquetWriterEmptyBatch(t *testing.T) {
 
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestParquetWriterCloseIsIdempotent(t *testing.T) {
+	var output bytes.Buffer
+	writer, err := NewParquetWriterForWriter(&output)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("first Close() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	if err := writer.WriteBatch(makeTestEntries(1)); err == nil {
+		t.Fatal("WriteBatch() after Close() succeeded")
+	}
+}
+
+func TestExportSeq2ToParquetWriterReportsCloseError(t *testing.T) {
+	closeErr := errors.New("close failed")
+	w := &closeErrorWriter{err: closeErr}
+	parser := logparser.New()
+
+	_, err := ExportSeq2ToParquetWriter(parser.All(strings.NewReader("line")), w)
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("ExportSeq2ToParquetWriter() error = %v, want %v", err, closeErr)
+	}
+}
+
+func TestNewParquetWriterForWriterReturnsInitialWriteError(t *testing.T) {
+	w := &writeErrorWriter{err: errors.New("write failed")}
+
+	if _, err := NewParquetWriterForWriter(w); err == nil {
+		t.Fatal("NewParquetWriterForWriter() succeeded")
 	}
 }
 

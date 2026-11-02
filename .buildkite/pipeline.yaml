@@ -8,7 +8,7 @@ steps:
         label: ':golangci-lint: lint'
         command: golangci-lint run --verbose --timeout 3m
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.5: ~
       - key: test
         label: ':go: test'
         artifact_paths:
@@ -18,4 +18,4 @@ steps:
           - go run github.com/nikolaydubina/go-cover-treemap -coverprofile cover.out > cover-tree.svg
           - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"        
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.5: ~

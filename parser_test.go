@@ -245,7 +245,10 @@ func TestLogIteratorEmpty(t *testing.T) {
 	parser := logparser.New()
 	reader := strings.NewReader("")
 
-	for range parser.All(reader) {
+	for _, err := range parser.All(reader) {
+		if err != nil {
+			t.Fatalf("Unexpected error for empty input: %v", err)
+		}
 		t.Error("Should not have entries for empty input")
 	}
 }

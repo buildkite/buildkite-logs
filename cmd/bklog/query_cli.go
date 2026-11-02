@@ -476,7 +476,10 @@ func streamByGroup(ctx context.Context, reader *buildkitelogs.ParquetReader, con
 
 	// Count total entries for stats if needed (requires separate iteration)
 	if config.ShowStats {
-		for range reader.ReadEntriesIter(ctx) {
+		for _, err := range reader.ReadEntriesIter(ctx) {
+			if err != nil {
+				return fmt.Errorf("error counting entries: %w", err)
+			}
 			totalEntries++
 		}
 	}

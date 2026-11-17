@@ -153,10 +153,12 @@ make clean test lint help
 make build
 ```
 
-**Build a snapshot with [goreleaser](https://goreleaser.com/):**
-```bash
-goreleaser build --snapshot --clean --single-target
-```
+**Download a release binary:**
+
+[GitHub Releases](https://github.com/buildkite/buildkite-logs/releases) include
+gzipped `bklog` binaries for Linux and macOS on amd64 and arm64, with SHA-256
+checksums. `make dist` builds the same files in `dist/`; see
+[RELEASE.md](RELEASE.md) for the release process.
 
 **Check version:**
 ```bash

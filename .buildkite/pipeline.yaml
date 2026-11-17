@@ -9,6 +9,13 @@ steps:
         command: golangci-lint run --verbose --timeout 3m
         plugins:
           - mise#v1.1.6: ~
+      - key: dist
+        label: ':package: dist'
+        command: make dist
+        artifact_paths:
+          - dist/*
+        plugins:
+          - mise#v1.1.6: ~
       - key: test
         label: ':go: test'
         artifact_paths:

@@ -3,8 +3,10 @@
 # Variables
 BINARY_NAME=bklog
 BUILD_DIR=build
+DIST_DIR=dist
+DIST_TARGETS=linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
 CMD_DIR=cmd/bklog
-VERSION?=dev
+VERSION?=$(shell cat VERSION)
 LDFLAGS=-ldflags "-X main.version=$(VERSION) -s -w"
 
 # Go related variables
@@ -24,7 +26,7 @@ all: clean test lint build
 clean:
 	@echo "Cleaning build artifacts..."
 	$(GOCLEAN)
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(DIST_DIR)
 	rm -f $(BINARY_NAME)
 
 # Run tests
@@ -51,6 +53,25 @@ build:
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -trimpath -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+
+# Cross-compile gzipped release binaries and their SHA-256 checksums
+.PHONY: dist
+dist:
+	@echo "Building $(BINARY_NAME) $(VERSION) release binaries..."
+	rm -rf $(DIST_DIR)
+	mkdir -p $(DIST_DIR)
+	set -e; for target in $(DIST_TARGETS); do \
+		name=$(BINARY_NAME)-$(VERSION)-$$target; \
+		CGO_ENABLED=0 GOOS=$${target%-*} GOARCH=$${target#*-} \
+			$(GOBUILD) $(LDFLAGS) -trimpath -o $(BUILD_DIR)/$$name ./$(CMD_DIR); \
+		gzip -9 -n -c $(BUILD_DIR)/$$name > $(DIST_DIR)/$$name.gz; \
+	done
+	cd $(DIST_DIR) && shasum -a 256 *.gz > $(BINARY_NAME)-$(VERSION)-sha256sums.txt
+
+# Print the version from VERSION
+.PHONY: version
+version:
+	@echo $(VERSION)
 
 # Install dependencies
 .PHONY: deps
@@ -113,6 +134,8 @@ help:
 	@echo "  lint       - Run golangci-lint"
 	@echo "  lint-fix   - Run golangci-lint with auto-fix"
 	@echo "  build      - Build the binary with version $(VERSION)"
+	@echo "  dist       - Build gzipped release binaries and checksums in $(DIST_DIR)/"
+	@echo "  version    - Print the version from VERSION"
 	@echo "  dev        - Quick development build"
 	@echo "  deps       - Install and tidy dependencies"
 	@echo "  bench      - Run benchmarks"
@@ -128,5 +151,6 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build VERSION=v1.2.3"
+	@echo "  make dist"
 	@echo "  make all"
 	@echo "  make dev"

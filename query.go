@@ -37,13 +37,32 @@ func (entry *ParquetLogEntry) IsGroup() bool {
 	return entry.Flags.IsGroup()
 }
 
-// CleanContent returns the content with optional ANSI stripping and whitespace trimming
+// CleanContent returns the content with optional ANSI stripping and whitespace trimming.
+// Carriage-return overwrites (\r) are collapsed to their final visible state, matching
+// what a terminal renders for progress-bar output.
 func (entry *ParquetLogEntry) CleanContent(stripANSI bool) string {
 	content := entry.Content
 	if stripANSI {
 		content = StripANSI(content)
 	}
-	return strings.TrimSpace(content)
+	return strings.TrimSpace(collapseCarriageReturns(content))
+}
+
+// collapseCarriageReturns keeps the last segment of a \r-overwritten line that
+// still has visible content. A terminal only replaces text when new characters
+// are written after the \r, so a line ending in \r (or \r followed by nothing
+// but erased sequences) keeps its previous text rather than becoming blank.
+func collapseCarriageReturns(content string) string {
+	if !strings.Contains(content, "\r") {
+		return content
+	}
+	segments := strings.Split(content, "\r")
+	for i := len(segments) - 1; i >= 0; i-- {
+		if strings.TrimSpace(segments[i]) != "" {
+			return segments[i]
+		}
+	}
+	return ""
 }
 
 // CleanGroup returns the group name with optional ANSI stripping and whitespace trimming
